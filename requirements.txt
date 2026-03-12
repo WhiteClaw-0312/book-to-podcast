@@ -1,0 +1,27 @@
+# 图书解析
+PyMuPDF>=1.23.0
+pdfplumber>=0.10.0
+ebooklib>=0.18
+
+# 知识库
+langchain>=0.1.0
+langchain-community>=0.0.10
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+
+# LLM
+openai>=1.0.0
+
+# TTS
+# Qwen3-TTS 或其他开源 TTS
+# 将在实现时添加具体依赖
+
+# 工具
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+click>=8.0.0
+rich>=13.0.0
+
+# 测试
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
