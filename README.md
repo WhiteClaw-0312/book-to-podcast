@@ -1,2 +1,3 @@
-# book-to-podcast
-Book to Podcast - 将书籍内容转化为播客形式
+# Book to Podcast
+
+Transform books into engaging podcast episodes - Let reading speak.
