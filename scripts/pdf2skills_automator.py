@@ -53,7 +53,7 @@ class PDF2SkillsAutomator:
             print(f"❌ 文件不存在: {pdf_path}")
             return False
         
-        print(f"📄 准备上传: {pdf_path.name}")
+        print(f"📄 准备上传: {pdf_path.name} ({pdf_path.stat().st_size / 1024 / 1024:.1f} MB)")
         
         try:
             # 访问网站
@@ -63,57 +63,36 @@ class PDF2SkillsAutomator:
             # 等待页面加载
             await self.page.wait_for_timeout(2000)
             
-            # 查找上传按钮（需要根据实际网站结构调整）
-            # 常见的选择器：
-            # - input[type="file"]
-            # - button:has-text("上传")
-            # - .upload-area
+            # 截图保存初始页面
+            await self.page.screenshot(path="data/pdf2skills_initial.png")
+            print("📸 初始页面截图: data/pdf2skills_initial.png")
             
-            upload_selectors = [
-                'input[type="file"]',
-                'button:has-text("上传")',
-                '.upload-btn',
-                '#upload',
-                '[data-testid="upload"]'
-            ]
+            # 查找文件上传 input
+            file_input = await self.page.query_selector('input[type="file"]')
             
-            upload_element = None
-            for selector in upload_selectors:
-                try:
-                    upload_element = await self.page.query_selector(selector)
-                    if upload_element:
-                        print(f"✅ 找到上传元素: {selector}")
-                        break
-                except:
-                    continue
-            
-            if not upload_element:
-                print("❌ 未找到上传按钮，页面可能需要登录或结构已变化")
-                # 截图保存
-                await self.page.screenshot(path="debug_upload_page.png")
-                print("📸 已保存截图: debug_upload_page.png")
+            if not file_input:
+                print("❌ 未找到文件上传 input")
                 return False
             
-            # 上传文件
-            if await upload_element.get_attribute("type") == "file":
-                await upload_element.set_input_files(str(pdf_path))
-            else:
-                # 点击上传按钮，然后处理文件选择
-                await upload_element.click()
-                file_input = await self.page.query_selector('input[type="file"]')
-                if file_input:
-                    await file_input.set_input_files(str(pdf_path))
+            print("✅ 找到文件上传 input")
             
+            # 上传文件
+            await file_input.set_input_files(str(pdf_path))
             print("📤 文件上传中...")
             
-            # 等待上传完成
-            await self.page.wait_for_timeout(5000)
+            # 等待上传响应
+            await self.page.wait_for_timeout(3000)
+            
+            # 截图保存上传后状态
+            await self.page.screenshot(path="data/pdf2skills_uploaded.png")
+            print("📸 上传后截图: data/pdf2skills_uploaded.png")
             
             return True
             
         except Exception as e:
             print(f"❌ 上传失败: {e}")
-            await self.page.screenshot(path="debug_error.png")
+            await self.page.screenshot(path="data/pdf2skills_error.png")
+            print("📸 错误截图: data/pdf2skills_error.png")
             return False
     
     async def wait_for_conversion(self, timeout: int = 1800) -> bool:
@@ -132,32 +111,21 @@ class PDF2SkillsAutomator:
         
         while time.time() - start_time < timeout:
             try:
-                # 检查是否有下载按钮或完成提示
-                download_selectors = [
-                    'button:has-text("下载")',
-                    'a:has-text("下载")',
-                    '.download-btn',
-                    '#download',
-                    '[data-testid="download"]',
-                    ':has-text("转换完成")',
-                    ':has-text("生成成功")'
-                ]
+                # 检查是否有 "Launch App" 按钮出现
+                launch_btn = await self.page.query_selector('button:has-text("Launch App")')
+                if launch_btn:
+                    print("✅ 转换完成！发现 Launch App 按钮")
+                    return True
                 
-                for selector in download_selectors:
+                # 检查进度条
+                progress_bar = await self.page.query_selector('[class*="progress"]')
+                if progress_bar:
+                    # 尝试获取进度
                     try:
-                        element = await self.page.query_selector(selector)
-                        if element:
-                            print(f"✅ 转换完成！")
-                            return True
+                        width = await progress_bar.evaluate('el => el.style.width || el.offsetWidth')
+                        print(f"📊 进度: {width}", end="\r")
                     except:
-                        continue
-                
-                # 检查进度
-                progress = await self.page.query_selector('.progress, [role="progressbar"]')
-                if progress:
-                    value = await progress.get_attribute("aria-valuenow")
-                    if value:
-                        print(f"📊 进度: {value}%", end="\r")
+                        pass
                 
                 await self.page.wait_for_timeout(5000)
                 
@@ -168,59 +136,68 @@ class PDF2SkillsAutomator:
         print(f"\n❌ 转换超时（{timeout}秒）")
         return False
     
-    async def download_skill(self, output_dir: str) -> bool:
+    async def launch_app(self) -> bool:
         """
-        下载生成的 Skill
-        
-        Args:
-            output_dir: 输出目录
+        启动转换后的应用
         
         Returns:
-            是否下载成功
+            是否成功
         """
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
-        
-        print(f"📥 下载 Skill 到: {output_path}")
+        print("🚀 启动应用...")
         
         try:
-            # 查找下载按钮
-            download_selectors = [
-                'button:has-text("下载")',
-                'a:has-text("下载")',
-                '.download-btn',
-                '#download'
-            ]
+            # 查找 Launch App 按钮
+            launch_btn = await self.page.query_selector('button:has-text("Launch App")')
             
-            download_btn = None
-            for selector in download_selectors:
-                try:
-                    download_btn = await self.page.query_selector(selector)
-                    if download_btn:
-                        break
-                except:
-                    continue
-            
-            if not download_btn:
-                print("❌ 未找到下载按钮")
+            if not launch_btn:
+                print("❌ 未找到 Launch App 按钮")
                 return False
             
-            # 处理下载
-            async with self.page.expect_download() as download_info:
-                await download_btn.click()
+            # 点击按钮
+            await launch_btn.click()
+            print("✅ 已点击 Launch App")
             
-            download = await download_info.value
+            # 等待新页面加载
+            await self.page.wait_for_timeout(3000)
             
-            # 保存文件
-            save_path = output_path / download.suggested_filename
-            await download.save_as(save_path)
+            # 截图
+            await self.page.screenshot(path="data/pdf2skills_app.png")
+            print("📸 应用页面截图: data/pdf2skills_app.png")
             
-            print(f"✅ Skill 已下载: {save_path}")
             return True
             
         except Exception as e:
-            print(f"❌ 下载失败: {e}")
+            print(f"❌ 启动应用失败: {e}")
             return False
+    
+    async def get_skill_content(self) -> str:
+        """
+        获取 Skill 内容
+        
+        Returns:
+            Skill 内容（Markdown 格式）
+        """
+        print("📖 获取 Skill 内容...")
+        
+        try:
+            # 获取页面内容
+            content = await self.page.content()
+            
+            # 尝试提取主要内容
+            # 这里需要根据实际页面结构调整
+            main_content = await self.page.query_selector('main, .content, .skill-content, [class*="skill"]')
+            
+            if main_content:
+                text = await main_content.inner_text()
+                print(f"✅ 获取到内容: {len(text)} 字符")
+                return text
+            else:
+                print("⚠️ 未找到主要内容区域")
+                return ""
+                
+        except Exception as e:
+            print(f"❌ 获取内容失败: {e}")
+            return ""
 
 
 async def convert_pdf_to_skill(
@@ -252,9 +229,24 @@ async def convert_pdf_to_skill(
         if not await automator.wait_for_conversion():
             return False
         
-        # 下载 Skill
-        if not await automator.download_skill(output_dir):
+        # 启动应用
+        if not await automator.launch_app():
             return False
+        
+        # 获取 Skill 内容
+        content = await automator.get_skill_content()
+        
+        if content:
+            # 保存内容
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            skill_file = output_path / "skill_content.md"
+            
+            with open(skill_file, "w", encoding="utf-8") as f:
+                f.write(content)
+            
+            print(f"✅ Skill 内容已保存: {skill_file}")
+            return True
         
         return True
         
