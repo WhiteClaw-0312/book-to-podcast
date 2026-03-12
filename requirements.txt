@@ -13,8 +13,7 @@ sentence-transformers>=2.2.0
 openai>=1.0.0
 
 # TTS
-# Qwen3-TTS 或其他开源 TTS
-# 将在实现时添加具体依赖
+edge-tts>=6.1.0
 
 # 工具
 pydantic>=2.0.0
