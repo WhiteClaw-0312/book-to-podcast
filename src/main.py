@@ -5,11 +5,8 @@ import click
 from pathlib import Path
 from rich.console import Console
 from rich.progress import track
-
-from src.parser import PDFParser
-from src.knowledge import KnowledgeBaseBuilder
-from src.script import ScriptGenerator
-from src.tts import PodcastTTS, TTSConfig, check_tts_available
+from rich.table import Table
+import json
 
 console = Console()
 
@@ -21,85 +18,83 @@ def cli():
 
 
 @cli.command()
-@click.argument("book_path", type=click.Path(exists=True))
+@click.argument("skill_path", type=click.Path(exists=True))
 @click.option("--output", "-o", default="data/output", help="输出目录")
-@click.option("--chapters", "-c", default=None, help="指定章节范围，如 1-3")
-def convert(book_path: str, output: str, chapters: str):
-    """转换图书为播客"""
-    console.print(f"[bold green]开始转换: {book_path}[/bold green]")
+@click.option("--api-key", "-k", envvar="BAILIAN_API_KEY", help="百炼 API Key")
+def generate(skill_path: str, output: str, api_key: str):
+    """从 Skill 生成播客文稿"""
+    if not api_key:
+        console.print("[red]错误: 请提供百炼 API Key (通过 -k 参数或 BAILIAN_API_KEY 环境变量)[/red]")
+        return
     
-    # 步骤 1: 解析图书
-    console.print("\n[bold]步骤 1/4: 解析图书...[/bold]")
-    with PDFParser(book_path) as parser:
-        metadata = parser.extract_metadata()
-        console.print(f"  书名: {metadata.get('title', '未知')}")
-        console.print(f"  页数: {metadata.get('page_count', 0)}")
-        
-        book_data = {
-            "metadata": metadata,
-            "text": parser.extract_text(),
-            "chapters": parser.detect_chapters(),
-        }
+    console.print(f"[bold green]开始生成播客文稿: {skill_path}[/bold green]")
     
-    # 步骤 2: 构建知识库
-    console.print("\n[bold]步骤 2/4: 构建知识库...[/bold]")
-    builder = KnowledgeBaseBuilder(book_data)
-    knowledge = builder.build()
-    console.print(f"  章节数: {len(knowledge.chapters)}")
-    console.print(f"  人物数: {len(knowledge.characters)}")
+    from src.script.skill_script import generate_podcast_from_skill
     
-    # 步骤 3: 生成播客文稿
-    console.print("\n[bold]步骤 3/4: 生成播客文稿...[/bold]")
-    generator = ScriptGenerator()
-    scripts = []
+    scripts = generate_podcast_from_skill(skill_path, api_key, output)
     
-    chapter_range = parse_chapter_range(chapters) if chapters else None
-    
-    for chapter in track(knowledge.chapters, description="生成文稿"):
-        if chapter_range and chapter.number not in chapter_range:
-            continue
-        script = generator.generate_script(
-            chapter.content,
-            chapter.title,
-            chapter.number
-        )
-        scripts.append(script)
-    
-    console.print(f"  生成文稿: {len(scripts)} 章")
-    
-    # 步骤 4: 合成语音
-    console.print("\n[bold]步骤 4/4: 合成语音...[/bold]")
-    tts = PodcastTTS()
-    
-    for script in track(scripts, description="合成语音"):
-        output_file = Path(output) / f"chapter_{script.chapter_number:02d}.mp3"
-        tts.synthesize_chapter(
-            [{"speaker": d.speaker, "content": d.content} for d in script.dialogues],
-            str(output_file)
-        )
-    
-    console.print(f"\n[bold green]✅ 转换完成！[/bold green]")
+    console.print(f"\n[bold green]✅ 生成完成！[/bold green]")
+    console.print(f"共生成 {len(scripts)} 章文稿")
     console.print(f"输出目录: {output}")
 
 
 @cli.command()
-@click.argument("book_path", type=click.Path(exists=True))
-def parse(book_path: str):
-    """解析图书并显示信息"""
-    console.print(f"[bold]解析: {book_path}[/bold]")
+@click.argument("skill_path", type=click.Path(exists=True))
+def info(skill_path: str):
+    """显示 Skill 信息"""
+    from src.script.skill_script import SkillKnowledge
     
-    with PDFParser(book_path) as parser:
-        metadata = parser.extract_metadata()
-        chapters = parser.detect_chapters()
-        
-        console.print(f"\n[bold]元数据:[/bold]")
-        for key, value in metadata.items():
-            if value:
-                console.print(f"  {key}: {value}")
-        
-        console.print(f"\n[bold]目录 ({len(chapters)} 章):[/bold]")
-        for ch in chapters[:20]:
-            console.print(f"  {'  ' * (ch['level']-1)}{ch['title']}")
+    skill = SkillKnowledge(skill_path)
+    skill.load()
+    
+    # 显示信息表格
+    table = Table(title="Skill 信息")
+    table.add_column("项目", style="cyan")
+    table.add_column("内容", style="green")
+    
+    table.add_row("路径", str(skill_path))
+    table.add_row("SKILL.md", "✅" if skill.skill_md else "❌")
+    table.add_row("引用文件数", str(len(skill.references)))
+    
+    chapters = skill.get_chapters()
+    table.add_row("章节数", str(len(chapters)))
+    
+    console.print(table)
+    
+    if chapters:
+        console.print("\n[bold]章节列表:[/bold]")
+        for i, ch in enumerate(chapters[:10]):
+            console.print(f"  {i+1}. {ch['title']}")
+
+
+@cli.command()
+@click.argument("script_path", type=click.Path(exists=True))
+@click.option("--output", "-o", default="data/output/audio", help="音频输出目录")
+def synthesize(script_path: str, output: str):
+    """合成播客音频"""
+    console.print(f"[bold]合成音频: {script_path}[/bold]")
+    
+    from src.tts import PodcastTTS
+    
+    # 加载文稿
+    with open(script_path, "r", encoding="utf-8") as f:
+        script_data = json.load(f)
+    
+    tts = PodcastTTS()
+    output_file = Path(output) / f"{Path(script_path).stem}.mp3"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    dialogues = [
+        {"speaker": d["speaker"], "content": d["content"]}
+        for d in script_data["dialogues"]
+    ]
+    
+    success = tts.synthesize_chapter(dialogues, str(output_file))
+    
+    if success:
+        console.print(f"[green]✅ 音频已保存: {output_file}[/green]")
+    else:
+        console.print("[red]❌ 音频合成失败[/red]")
 
 
 @cli.command()
@@ -108,27 +103,22 @@ def check():
     console.print("[bold]检查系统环境...[/bold]\n")
     
     # 检查 TTS
+    from src.tts import check_tts_available
     tts_status = check_tts_available()
-    console.print(f"edge-tts: {'✅' if tts_status['edge-tts'] else '❌'}")
-    console.print(f"ffmpeg: {'✅' if tts_status['ffmpeg'] else '❌'}")
     
-    # 检查 Python 包
-    packages = ["fitz", "pydantic", "langchain"]
-    console.print("\n[bold]Python 包:[/bold]")
-    for pkg in packages:
-        try:
-            __import__(pkg)
-            console.print(f"  {pkg}: ✅")
-        except ImportError:
-            console.print(f"  {pkg}: ❌")
-
-
-def parse_chapter_range(range_str: str) -> list:
-    """解析章节范围，如 '1-3' -> [1,2,3]"""
-    if "-" in range_str:
-        start, end = map(int, range_str.split("-"))
-        return list(range(start, end + 1))
-    return [int(range_str)]
+    table = Table(title="环境检查")
+    table.add_column("组件", style="cyan")
+    table.add_column("状态", style="green")
+    
+    table.add_row("edge-tts", "✅" if tts_status["edge-tts"] else "❌")
+    table.add_row("ffmpeg", "✅" if tts_status["ffmpeg"] else "❌")
+    
+    console.print(table)
+    
+    # 检查 API Key
+    import os
+    api_key = os.environ.get("BAILIAN_API_KEY")
+    console.print(f"\n百炼 API Key: {'✅ 已配置' if api_key else '❌ 未配置'}")
 
 
 if __name__ == "__main__":
