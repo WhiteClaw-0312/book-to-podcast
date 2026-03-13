@@ -393,4 +393,20 @@ async def get_script(task_id: str, chapter_num: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    # HTTPS 配置
+    cert_path = Path(__file__).parent.parent / "cert.pem"
+    key_path = Path(__file__).parent.parent / "key.pem"
+    
+    if cert_path.exists() and key_path.exists():
+        print("🔒 启动 HTTPS 服务器 (端口 8443)")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=8443,
+            ssl_certfile=str(cert_path),
+            ssl_keyfile=str(key_path)
+        )
+    else:
+        print("🔓 启动 HTTP 服务器 (端口 8000)")
+        uvicorn.run(app, host="0.0.0.0", port=8000)
