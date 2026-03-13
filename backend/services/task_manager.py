@@ -2,13 +2,11 @@
 import os
 import json
 import uuid
-import asyncio
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from datetime import datetime
 
 from models.task import Task, TaskStatus, TaskProgress, ChapterInfo
-from utils.crypto import encrypt_api_key, decrypt_api_key
 
 
 class TaskManager:
@@ -26,6 +24,9 @@ class TaskManager:
             try:
                 with open(task_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    # 转换 status 为枚举
+                    if isinstance(data.get("status"), str):
+                        data["status"] = TaskStatus(data["status"])
                     task = Task(**data)
                     self.tasks[task.id] = task
             except Exception as e:
@@ -35,7 +36,11 @@ class TaskManager:
         """保存任务"""
         task_file = self.data_dir / f"{task.id}.json"
         with open(task_file, "w", encoding="utf-8") as f:
-            json.dump(task.model_dump(), f, ensure_ascii=False, indent=2, default=str)
+            # 转换为可序列化的字典
+            data = task.model_dump()
+            data["created_at"] = data["created_at"].isoformat() if isinstance(data.get("created_at"), datetime) else data.get("created_at", "")
+            data["updated_at"] = data["updated_at"].isoformat() if isinstance(data.get("updated_at"), datetime) else data.get("updated_at", "")
+            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
     
     def create_task(self, filename: str) -> Task:
         """创建新任务"""
@@ -74,9 +79,7 @@ class TaskManager:
         task_id: str, 
         status: TaskStatus,
         progress: int = None,
-        message: str = None,
-        current_step: str = None,
-        completed_steps: int = None
+        message: str = None
     ):
         """更新进度"""
         task = self.tasks.get(task_id)
@@ -87,10 +90,6 @@ class TaskManager:
                 task.progress.progress = progress
             if message:
                 task.progress.message = message
-            if current_step:
-                task.progress.current_step = current_step
-            if completed_steps is not None:
-                task.progress.completed_steps = completed_steps
             task.updated_at = datetime.now()
             self._save_task(task)
     

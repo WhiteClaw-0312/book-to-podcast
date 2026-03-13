@@ -1,12 +1,12 @@
 <template>
-  <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+  <div class="border border-green-500/30 rounded-xl p-4 bg-green-900/30">
     <!-- Header -->
     <div class="flex items-center justify-between mb-3">
       <div>
-        <h3 class="font-medium text-gray-800">
+        <h3 class="font-medium text-green-100">
           第 {{ podcast.number }} 章: {{ podcast.title }}
         </h3>
-        <p class="text-sm text-gray-500">
+        <p class="text-sm text-green-400">
           {{ formatDuration(podcast.duration) }}
         </p>
       </div>
@@ -16,7 +16,7 @@
           v-if="taskId"
           :href="`${API_BASE}/api/audio/${taskId}/${String(podcast.number).padStart(2, '0')}`"
           download
-          class="text-gray-500 hover:text-indigo-600"
+          class="text-green-400 hover:text-green-300"
           title="下载音频"
         >
           ⬇️
@@ -29,7 +29,7 @@
       <!-- Play Button -->
       <button 
         @click="togglePlay"
-        class="w-10 h-10 flex items-center justify-center rounded-full bg-indigo-500 text-white hover:bg-indigo-600 transition-colors"
+        class="w-12 h-12 flex items-center justify-center rounded-full bg-gradient-to-br from-green-400 to-green-600 text-white hover:from-green-300 hover:to-green-500 transition-all shadow-lg shadow-green-500/20"
       >
         {{ isPlaying ? '⏸' : '▶️' }}
       </button>
@@ -37,17 +37,17 @@
       <!-- Progress -->
       <div class="flex-1">
         <div 
-          class="h-2 bg-gray-200 rounded-full cursor-pointer"
+          class="h-2 bg-green-800 rounded-full cursor-pointer overflow-hidden"
           @click="seek"
           ref="progressBar"
         >
           <div 
-            class="h-full bg-indigo-500 rounded-full"
+            class="h-full bg-gradient-to-r from-green-400 to-green-500 rounded-full transition-all"
             :style="{ width: progressPercent + '%' }"
           ></div>
         </div>
         
-        <div class="flex justify-between text-xs text-gray-500 mt-1">
+        <div class="flex justify-between text-xs text-green-400 mt-1">
           <span>{{ formatTime(currentTime) }}</span>
           <span>{{ formatTime(duration) }}</span>
         </div>
@@ -57,20 +57,20 @@
     <!-- Script Toggle -->
     <button 
       @click="showScript = !showScript"
-      class="mt-3 text-sm text-indigo-600 hover:underline"
+      class="mt-3 text-sm text-green-400 hover:text-green-300"
     >
-      {{ showScript ? '隐藏文稿' : '显示文稿' }}
+      {{ showScript ? '▲ 隐藏文稿' : '▼ 显示文稿' }}
     </button>
 
     <!-- Script Content -->
-    <div v-if="showScript && script" class="mt-3 p-3 bg-gray-50 rounded-lg max-h-64 overflow-y-auto">
+    <div v-if="showScript && script" class="mt-3 p-3 bg-green-950/50 rounded-lg max-h-64 overflow-y-auto text-sm">
       <div 
         v-for="(line, i) in script.dialogues" 
         :key="i"
         class="mb-2"
       >
-        <span class="font-medium text-indigo-600">[{{ line.speaker }}]:</span>
-        <span class="text-gray-700">{{ line.content }}</span>
+        <span class="font-medium text-green-300">[{{ line.speaker }}]:</span>
+        <span class="text-green-100">{{ line.content }}</span>
       </div>
     </div>
   </div>
@@ -153,18 +153,6 @@ export default {
       const rect = progressBar.value.getBoundingClientRect()
       const percent = (e.clientX - rect.left) / rect.width
       audio.currentTime = percent * audio.duration
-    }
-
-    const loadScript = async () => {
-      if (!props.taskId || !props.podcast.number) return
-      
-      try {
-        const chapterNum = String(props.podcast.number).padStart(2, '0')
-        const response = await axios.get(`${API_BASE}/api/script/${props.taskId}/${chapterNum}`)
-        script.value = response.data
-      } catch (error) {
-        console.error('Failed to load script:', error)
-      }
     }
 
     onMounted(() => {
