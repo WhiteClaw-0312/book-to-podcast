@@ -14,7 +14,7 @@
       <div class="flex gap-2">
         <a 
           v-if="taskId"
-          :href="`/api/audio/${taskId}/${String(podcast.number).padStart(2, '0')}`"
+          :href="`${API_BASE}/api/audio/${taskId}/${String(podcast.number).padStart(2, '0')}`"
           download
           class="text-gray-500 hover:text-indigo-600"
           title="下载音频"
@@ -80,6 +80,8 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 
+const API_BASE = 'http://139.196.211.206:8000'
+
 export default {
   name: 'PodcastPlayer',
   props: {
@@ -113,7 +115,7 @@ export default {
       if (!props.taskId || !props.podcast.number) return
       
       const chapterNum = String(props.podcast.number).padStart(2, '0')
-      const audioUrl = `/api/audio/${props.taskId}/${chapterNum}`
+      const audioUrl = `${API_BASE}/api/audio/${props.taskId}/${chapterNum}`
       
       audio = new Audio(audioUrl)
       
@@ -158,7 +160,7 @@ export default {
       
       try {
         const chapterNum = String(props.podcast.number).padStart(2, '0')
-        const response = await axios.get(`/api/script/${props.taskId}/${chapterNum}`)
+        const response = await axios.get(`${API_BASE}/api/script/${props.taskId}/${chapterNum}`)
         script.value = response.data
       } catch (error) {
         console.error('Failed to load script:', error)

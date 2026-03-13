@@ -171,7 +171,10 @@ export default {
       }
     }
 
-    const uploadPdf = async () => {
+    // API 基础地址
+const API_BASE = 'http://139.196.211.206:8000'
+
+const uploadPdf = async () => {
       if (!canUpload.value) return
 
       uploading.value = true
@@ -182,7 +185,7 @@ export default {
         formData.append('qwen_api_key', qwenApiKey.value)
         formData.append('qwen_tts_key', qwenTtsKey.value)
 
-        const response = await axios.post('/api/upload', formData, {
+        const response = await axios.post(`${API_BASE}/api/upload`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         })
 
@@ -201,7 +204,7 @@ export default {
         if (!currentTask.value?.id) return
         
         try {
-          const response = await axios.get(`/api/status/${currentTask.value.id}`)
+          const response = await axios.get(`${API_BASE}/api/status/${currentTask.value.id}`)
           currentTask.value = response.data
           
           if (response.data.status === 'completed') {
@@ -231,7 +234,7 @@ export default {
     onMounted(async () => {
       // 加载最近的任务
       try {
-        const response = await axios.get('/api/tasks?limit=5')
+        const response = await axios.get(`${API_BASE}/api/tasks?limit=5`)
         // 可以显示历史任务
       } catch (error) {
         console.log('No existing tasks')
