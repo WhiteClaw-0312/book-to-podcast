@@ -1,5 +1,9 @@
-"""语音合成模块"""
+"""TTS 语音合成模块"""
 
-from .engine import PodcastTTS, TTSConfig, check_tts_available
+from .podcast_tts import PodcastTTS, TTSConfig, synthesize_podcast
+from .unified_tts import UnifiedTTS, UnifiedTTSConfig
 
-__all__ = ["PodcastTTS", "TTSConfig", "check_tts_available"]
+__all__ = [
+    "PodcastTTS", "TTSConfig", "synthesize_podcast",
+    "UnifiedTTS", "UnifiedTTSConfig"
+]
