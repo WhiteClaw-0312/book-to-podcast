@@ -10,10 +10,12 @@ from .pipeline import BookToPodcastPipeline, PipelineConfig
 from .pdf_to_skill import PDFSkillExtractor, PDFSkillConfig
 from .podcast_writer import PodcastScriptGenerator, PodcastConfig
 from .audio_synthesizer import AudioSynthesizer, AudioConfig
+from .concurrent_pipeline import ConcurrentPipeline, process_book, run_concurrent_pipeline
 
 __all__ = [
     "BookToPodcastPipeline", "PipelineConfig",
     "PDFSkillExtractor", "PDFSkillConfig",
     "PodcastScriptGenerator", "PodcastConfig",
-    "AudioSynthesizer", "AudioConfig"
+    "AudioSynthesizer", "AudioConfig",
+    "ConcurrentPipeline", "process_book", "run_concurrent_pipeline"
 ]
