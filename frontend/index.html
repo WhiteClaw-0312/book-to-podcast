@@ -293,6 +293,9 @@
         <div :class="['status-badge', backendOnline ? 'status-online' : 'status-offline']">
           {{ backendOnline ? '● 在线' : '○ 离线' }}
         </div>
+        <div v-if="!backendOnline" style="font-size: 11px; color: #f44336; margin-top: 4px;">
+          ⚠️ 请在浏览器地址栏左侧 → 网站设置 → 不安全内容 → 允许
+        </div>
       </div>
       
       <!-- API Key -->
@@ -462,10 +465,15 @@
         
         const checkBackend = async () => {
           try {
-            const res = await axios.get(API + '/', { timeout: 3000 });
+            const res = await axios.get(API + '/', { timeout: 5000 });
             backendOnline.value = res.status === 200;
-          } catch {
+          } catch (e) {
             backendOnline.value = false;
+            console.error('后端连接失败:', e.message);
+            // 可能是 HTTPS 页面访问 HTTP API 被浏览器阻止
+            if (e.message.includes('Network Error')) {
+              console.error('⚠️ 可能原因: HTTPS 页面无法直接访问 HTTP 后端，请在浏览器中允许不安全内容或使用 HTTP 访问前端');
+            }
           }
         };
         
