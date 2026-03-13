@@ -3,7 +3,7 @@
 完整的图书转播客流程：
 1. PDF → Skill（使用 skill-seekers）
 2. Skill → 播客文稿（使用 qwen3.5-plus，按章节）
-3. 文稿 → 音频（qwen-tts + edge-tts 保底）
+3. 文稿 → 音频（edge-tts）
 """
 
 from .pipeline import BookToPodcastPipeline, PipelineConfig

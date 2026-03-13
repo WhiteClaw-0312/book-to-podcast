@@ -1,6 +1,6 @@
 """
 并发处理的图书转播客 Pipeline
-文稿生成与音频合成并行执行
+文稿生成与音频合成并行执行（使用 edge-tts）
 """
 
 import os
@@ -11,13 +11,10 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from datetime import datetime
-import base64
-
 
 # ==================== 配置 ====================
 
 QWEN_API_KEY = "sk-sp-24c19ee00acc4bae93d0983c74fa2854"
-QWEN_TTS_KEY = "sk-62a401c7f96448c4981f5f8aa937f7eb"
 
 OUTPUT_DIR = Path("data")
 SCRIPTS_DIR = OUTPUT_DIR / "output" / "scripts"
@@ -130,10 +127,9 @@ class ScriptGenerator:
 # ==================== 音频合成器 ====================
 
 class AudioSynthesizer:
-    """音频合成器（支持 Qwen TTS + edge-tts 保底）"""
+    """音频合成器（使用 edge-tts）"""
     
     def __init__(self):
-        self.qwen_api_key = QWEN_TTS_KEY
         AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     
     async def synthesize(self, chapter_number: int, dialogues: List[Dict]) -> Dict:
@@ -142,12 +138,7 @@ class AudioSynthesizer:
         
         output_path = str(AUDIO_DIR / f"chapter_{chapter_number:02d}.mp3")
         
-        # 尝试 Qwen TTS
-        success = await self._synthesize_with_qwen(dialogues, output_path)
-        
-        if not success:
-            print(f"⚠️ [音频] Qwen TTS 失败，切换 edge-tts...", flush=True)
-            success = await self._synthesize_with_edge(dialogues, output_path)
+        success = await self._synthesize_with_edge(dialogues, output_path)
         
         if success:
             duration = self._get_duration(output_path)
@@ -160,68 +151,6 @@ class AudioSynthesizer:
         else:
             print(f"❌ [音频] 第 {chapter_number} 章失败", flush=True)
             return {"success": False}
-    
-    async def _synthesize_with_qwen(self, dialogues: List[Dict], output_path: str) -> bool:
-        """使用 Qwen TTS 合成"""
-        import aiohttp
-        
-        temp_files = []
-        
-        for i, d in enumerate(dialogues):
-            speaker = d["speaker"]
-            content = d["content"]
-            
-            voice = "Cherry" if speaker == "小北" else "Zhichu"
-            instructions = "语气活泼自然，适合播客主持。" if speaker == "小北" else "语气沉稳温和，适合播客讲解。"
-            
-            temp_path = str(AUDIO_DIR / f"qwen_temp_{i}.wav")
-            
-            url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-            headers = {
-                "Authorization": f"Bearer {self.qwen_api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "qwen3-tts-instruct-flash",
-                "input": {
-                    "text": content,
-                    "voice": voice,
-                    "language_type": "Chinese",
-                    "instructions": instructions,
-                    "optimize_instructions": True
-                }
-            }
-            
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, headers=headers, json=payload) as resp:
-                        if resp.status != 200:
-                            continue
-                        
-                        result = await resp.json()
-                        audio_url = result.get("output", {}).get("audio", {}).get("url")
-                        
-                        if audio_url:
-                            async with session.get(audio_url) as audio_resp:
-                                if audio_resp.status == 200:
-                                    audio_data = await audio_resp.read()
-                                    with open(temp_path, "wb") as f:
-                                        f.write(audio_data)
-                                    temp_files.append(temp_path)
-            except:
-                continue
-        
-        if not temp_files:
-            return False
-        
-        # 合并
-        await self._merge_audio(temp_files, output_path)
-        
-        # 清理
-        for f in temp_files:
-            Path(f).unlink(missing_ok=True)
-        
-        return Path(output_path).exists()
     
     async def _synthesize_with_edge(self, dialogues: List[Dict], output_path: str) -> bool:
         """使用 edge-tts 合成"""
@@ -241,7 +170,7 @@ class AudioSynthesizer:
             )
             await proc.communicate()
             
-            if Path(temp_path).exists():
+            if Path(temp_path).exists() and Path(temp_path).stat().st_size > 0:
                 temp_files.append(temp_path)
         
         if not temp_files:
@@ -252,7 +181,7 @@ class AudioSynthesizer:
         for f in temp_files:
             Path(f).unlink(missing_ok=True)
         
-        return Path(output_path).exists()
+        return Path(output_path).exists() and Path(output_path).stat().st_size > 0
     
     async def _merge_audio(self, audio_files: List[str], output_path: str):
         """合并音频"""
