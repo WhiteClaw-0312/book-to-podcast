@@ -9,7 +9,7 @@ export default defineConfig({
       '@': resolve(__dirname, 'src')
     }
   },
-  base: '/',
+  base: '/book-to-podcast/',
   server: {
     port: 3000,
     proxy: {
