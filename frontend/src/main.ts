@@ -5,7 +5,7 @@ import './style.css'
 
 // 路由
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory('/book-to-podcast/'),
   routes: [
     { path: '/', component: () => import('./views/Home.vue') },
     { path: '/upload', component: () => import('./views/Upload.vue') },
