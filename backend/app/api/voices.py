@@ -1,0 +1,111 @@
+"""音色配置 API"""
+from typing import List
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+
+from ..database import get_db
+from ..models import VoiceConfig
+
+router = APIRouter(prefix="/api/voices", tags=["voices"])
+
+
+class VoiceResponse(BaseModel):
+    id: str
+    speaker_name: str
+    voice_id: str
+    voice_name: str
+    gender: str
+    description: str | None
+    preview_text: str | None
+
+    class Config:
+        from_attributes = True
+
+
+# edge-tts 支持的中文音色
+EDGE_TTS_VOICES = [
+    # 女声
+    {"speaker_name": "晓晓", "voice_id": "zh-CN-XiaoxiaoNeural", "voice_name": "晓晓 - 活泼女声", "gender": "female", "description": "声音活泼自然，适合日常对话", "preview_text": "大家好，欢迎来到今天的节目！"},
+    {"speaker_name": "晓伊", "voice_id": "zh-CN-XiaoyiNeural", "voice_name": "晓伊 - 温柔女声", "gender": "female", "description": "温柔甜美，适合讲故事", "preview_text": "今天我要给大家讲一个有趣的故事。"},
+    {"speaker_name": "晓涵", "voice_id": "zh-CN-XiaohanNeural", "voice_name": "晓涵 - 甜美女声", "gender": "female", "description": "声音甜美动听", "preview_text": "很高兴能和大家一起分享。"},
+    {"speaker_name": "晓梦", "voice_id": "zh-CN-XiaomengNeural", "voice_name": "晓梦 - 少女音", "gender": "female", "description": "青春活力的少女音", "preview_text": "哇，这也太棒了吧！"},
+    {"speaker_name": "晓萱", "voice_id": "zh-CN-XiaoxuanNeural", "voice_name": "晓萱 - 成熟女声", "gender": "female", "description": "知性优雅，适合正式场合", "preview_text": "让我们一起来探讨这个话题。"},
+    {"speaker_name": "晓睿", "voice_id": "zh-CN-XiaoruiNeural", "voice_name": "晓睿 - 知性女声", "gender": "female", "description": "沉稳知性，适合科普内容", "preview_text": "这个问题值得我们深入思考。"},
+    
+    # 男声
+    {"speaker_name": "云希", "voice_id": "zh-CN-YunxiNeural", "voice_name": "云希 - 阳光男声", "gender": "male", "description": "阳光开朗，适合轻松对话", "preview_text": "没错，我也这么认为！"},
+    {"speaker_name": "云健", "voice_id": "zh-CN-YunjianNeural", "voice_name": "云健 - 磁性男声", "gender": "male", "description": "磁性低沉，适合讲故事", "preview_text": "让我来为大家详细介绍一下。"},
+    {"speaker_name": "云夏", "voice_id": "zh-CN-YunxiaNeural", "voice_name": "云夏 - 少年音", "gender": "male", "description": "清澈少年音", "preview_text": "这个想法真的很有创意！"},
+    {"speaker_name": "云扬", "voice_id": "zh-CN-YunyangNeural", "voice_name": "云扬 - 新闻播音", "gender": "male", "description": "专业播音腔，适合正式内容", "preview_text": "以下是今天的重点内容。"},
+]
+
+
+def init_voices(db: Session):
+    """初始化音色配置"""
+    existing = db.query(VoiceConfig).first()
+    if existing:
+        return
+    
+    for i, v in enumerate(EDGE_TTS_VOICES):
+        voice = VoiceConfig(
+            speaker_name=v["speaker_name"],
+            voice_id=v["voice_id"],
+            voice_name=v["voice_name"],
+            gender=v["gender"],
+            description=v.get("description"),
+            preview_text=v.get("preview_text"),
+            sort_order=i
+        )
+        db.add(voice)
+    db.commit()
+
+
+@router.get("", response_model=List[VoiceResponse])
+async def list_voices(db: Session = Depends(get_db)):
+    """获取可用音色列表"""
+    init_voices(db)
+    
+    voices = db.query(VoiceConfig).filter(
+        VoiceConfig.is_active == True
+    ).order_by(VoiceConfig.gender, VoiceConfig.sort_order).all()
+    
+    return voices
+
+
+@router.get("/female", response_model=List[VoiceResponse])
+async def list_female_voices(db: Session = Depends(get_db)):
+    """获取女声音色"""
+    init_voices(db)
+    
+    voices = db.query(VoiceConfig).filter(
+        VoiceConfig.is_active == True,
+        VoiceConfig.gender == "female"
+    ).order_by(VoiceConfig.sort_order).all()
+    
+    return voices
+
+
+@router.get("/male", response_model=List[VoiceResponse])
+async def list_male_voices(db: Session = Depends(get_db)):
+    """获取男声音色"""
+    init_voices(db)
+    
+    voices = db.query(VoiceConfig).filter(
+        VoiceConfig.is_active == True,
+        VoiceConfig.gender == "male"
+    ).order_by(VoiceConfig.sort_order).all()
+    
+    return voices
+
+
+@router.get("/{voice_id}")
+async def get_voice(voice_id: str, db: Session = Depends(get_db)):
+    """获取音色详情"""
+    init_voices(db)
+    
+    voice = db.query(VoiceConfig).filter(VoiceConfig.id == voice_id).first()
+    if not voice:
+        return {"error": "音色不存在"}
+    
+    return voice

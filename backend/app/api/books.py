@@ -38,6 +38,7 @@ def verify_api_key(api_key: str, db: Session) -> APIKey:
 
 @router.post("", response_model=BookResponse)
 async def upload_book(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     api_key: str = Form(...),
     db: Session = Depends(get_db)
@@ -75,8 +76,8 @@ async def upload_book(
     db.add(book)
     db.commit()
     
-    # 启动后台任务
-    asyncio.create_task(process_book(book_id))
+    # 使用 FastAPI BackgroundTasks 启动后台任务
+    background_tasks.add_task(run_process_book, book_id)
     
     return BookResponse(
         id=book.id,
@@ -88,6 +89,24 @@ async def upload_book(
         created_at=book.created_at,
         expires_at=book.expires_at
     )
+
+
+def run_process_book(book_id: str):
+    """同步包装函数，在新线程中运行"""
+    import threading
+    import asyncio
+    
+    def run_in_thread():
+        # 创建新的事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(process_book(book_id))
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
 
 
 async def process_book(book_id: str):
@@ -173,6 +192,7 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
 async def generate_podcast(
     book_id: str,
     request: GenerateRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """生成播客"""
@@ -201,13 +221,30 @@ async def generate_podcast(
     db.commit()
     
     # 启动生成任务
-    asyncio.create_task(generate_chapters(book_id, request.chapters, request.api_key))
+    background_tasks.add_task(run_generate_chapters, book_id, request.chapters, request.api_key)
     
     return GenerateResponse(
         message=f"开始生成 {cost} 章",
         cost=cost,
         estimated_time=cost * 180  # 约3分钟/章
     )
+
+
+def run_generate_chapters(book_id: str, chapter_numbers: List[int], api_key: str):
+    """同步包装函数，在新线程中运行"""
+    import threading
+    import asyncio
+    
+    def run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(generate_chapters(book_id, chapter_numbers, api_key))
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
 
 
 async def generate_chapters(book_id: str, chapter_numbers: List[int], api_key: str):

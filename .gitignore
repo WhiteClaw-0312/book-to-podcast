@@ -21,3 +21,4 @@ frontend/dist/
 *.log
 .envnode_modules/
 *.db
+node_modules/

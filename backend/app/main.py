@@ -1,4 +1,4 @@
-"""主入口"""
+"""主入口 v4.0"""
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -10,6 +10,9 @@ from pathlib import Path
 from .config import settings
 from .database import init_db
 from .api import books_router, billing_router
+from .api.auth import router as auth_router
+from .api.prompts import router as prompts_router
+from .api.voices import router as voices_router
 
 
 @asynccontextmanager
@@ -18,6 +21,19 @@ async def lifespan(app: FastAPI):
     # 启动时
     init_db()
     print(f"✅ 数据库初始化完成: {settings.DB_PATH}")
+    
+    # 初始化默认数据
+    from .database import SessionLocal
+    from .api.prompts import init_default_prompts
+    from .api.voices import init_voices
+    
+    db = SessionLocal()
+    try:
+        init_default_prompts(db)
+        init_voices(db)
+    finally:
+        db.close()
+    
     yield
     # 关闭时
     pass
@@ -25,8 +41,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="枕边书 API",
-    description="图书转播客 API - 按次计费",
-    version="3.0.0",
+    description="图书转播客 API v4.0 - 用户系统 + Prompt编辑 + 多音色",
+    version="4.0.0",
     lifespan=lifespan
 )
 
@@ -43,6 +59,9 @@ app.add_middleware(
 app.mount("/audio", StaticFiles(directory=settings.PODCASTS_DIR), name="audio")
 
 # 路由
+app.include_router(auth_router)
+app.include_router(prompts_router)
+app.include_router(voices_router)
 app.include_router(books_router)
 app.include_router(billing_router)
 
