@@ -48,9 +48,13 @@ const upload = async () => {
   try {
     const res = await apiFetch('/api/books', {
       method: 'POST',
-      body: form,
-      headers: {} // 让浏览器自动设置 multipart/form-data
+      body: form
     })
+    
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.detail || '上传失败')
+    }
     
     const data = await res.json()
     bookId.value = data.id
