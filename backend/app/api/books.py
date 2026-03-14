@@ -38,7 +38,6 @@ def verify_api_key(api_key: str, db: Session) -> APIKey:
 
 @router.post("", response_model=BookResponse)
 async def upload_book(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     api_key: str = Form(...),
     db: Session = Depends(get_db)
@@ -76,8 +75,8 @@ async def upload_book(
     db.add(book)
     db.commit()
     
-    # 使用 FastAPI BackgroundTasks 启动后台任务
-    background_tasks.add_task(run_process_book, book_id)
+    # 直接启动后台线程
+    run_process_book(book_id)
     
     return BookResponse(
         id=book.id,
@@ -192,7 +191,6 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
 async def generate_podcast(
     book_id: str,
     request: GenerateRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """生成播客"""
@@ -221,7 +219,7 @@ async def generate_podcast(
     db.commit()
     
     # 启动生成任务
-    background_tasks.add_task(run_generate_chapters, book_id, request.chapters, request.api_key)
+    run_generate_chapters(book_id, request.chapters, request.api_key)
     
     return GenerateResponse(
         message=f"开始生成 {cost} 章",

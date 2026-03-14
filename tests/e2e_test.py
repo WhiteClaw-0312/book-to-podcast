@@ -12,7 +12,7 @@ from pathlib import Path
 
 # 配置
 API_BASE = "https://139.196.211.206"
-API_KEY = "pk_c12ce60b7fd64bf1aea3fa39"
+API_KEY = "pk_e3ce10b4b8f7480abb120aa6"
 TEST_PDF = "/tmp/test_book.pdf"
 
 # 颜色输出
