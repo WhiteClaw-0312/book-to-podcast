@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { apiFetch } from '../api'
 
 const router = useRouter()
 const apiKey = ref('')
@@ -9,7 +10,7 @@ const backendOnline = ref(false)
 // 检查后端状态
 const checkBackend = async () => {
   try {
-    const res = await fetch('/api/health')
+    const res = await apiFetch('/health')
     backendOnline.value = res.ok
   } catch {
     backendOnline.value = false

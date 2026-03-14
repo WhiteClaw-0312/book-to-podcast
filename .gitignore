@@ -19,4 +19,5 @@ frontend/dist/
 # 系统
 .DS_Store
 *.log
-.env
+.envnode_modules/
+*.db

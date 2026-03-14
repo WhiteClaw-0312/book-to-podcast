@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import { apiFetch } from '../api'
 
 const router = useRouter()
 const apiKey = ref('')
@@ -16,9 +16,10 @@ const checkBalance = async () => {
   loading.value = true
   
   try {
-    const res = await axios.get(`/api/keys/${apiKey.value}/balance`)
-    balance.value = res.data.balance
-    totalUsed.value = res.data.total_used
+    const res = await apiFetch(`/api/keys/${apiKey.value}/balance`)
+    const data = await res.json()
+    balance.value = data.balance
+    totalUsed.value = data.total_used
   } catch (e) {
     alert('查询失败，请检查 API Key')
   } finally {

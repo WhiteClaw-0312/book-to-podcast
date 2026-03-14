@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+import { apiFetch, getApiUrl } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,8 +41,8 @@ const selectedCount = computed(() => selectedChapters.value.length)
 // 获取书籍数据
 const fetchBook = async () => {
   try {
-    const res = await axios.get(`/api/books/${route.params.id}`)
-    book.value = res.data
+    const res = await apiFetch(`/api/books/${route.params.id}`)
+    book.value = await res.json()
   } catch (e) {
     alert('获取书籍失败')
     router.push('/')
@@ -69,9 +69,12 @@ const generate = async () => {
   generating.value = true
   
   try {
-    await axios.post(`/api/books/${route.params.id}/generate`, {
-      chapters: selectedChapters.value,
-      api_key: apiKey.value
+    await apiFetch(`/api/books/${route.params.id}/generate`, {
+      method: 'POST',
+      body: JSON.stringify({
+        chapters: selectedChapters.value,
+        api_key: apiKey.value
+      })
     })
     
     alert(`开始生成 ${selectedCount.value} 章，请稍候...`)
@@ -86,7 +89,7 @@ const generate = async () => {
     }, 3000)
     
   } catch (e: any) {
-    alert('生成失败: ' + (e.response?.data?.detail || e.message))
+    alert('生成失败: ' + e.message)
     generating.value = false
   }
 }
@@ -101,7 +104,7 @@ const togglePlay = (chapterNum: number) => {
   
   audioElement.value?.pause()
   
-  const audio = new Audio(`/api/books/${route.params.id}/chapters/${chapterNum}/audio`)
+  const audio = new Audio(getApiUrl(`/api/books/${route.params.id}/chapters/${chapterNum}/audio`))
   audio.play()
   
   audio.onended = () => {
@@ -117,6 +120,16 @@ const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60)
   const s = Math.floor(seconds % 60)
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+// 获取音频URL
+const getAudioUrl = (chapterNum: number) => {
+  return getApiUrl(`/api/books/${route.params.id}/chapters/${chapterNum}/audio`)
+}
+
+// 获取文稿URL
+const getScriptUrl = (chapterNum: number) => {
+  return getApiUrl(`/api/books/${route.params.id}/chapters/${chapterNum}/script`)
 }
 
 onMounted(() => {
@@ -228,14 +241,14 @@ onMounted(() => {
         
         <div v-if="ch.has_audio" style="margin-top: 12px; display: flex; gap: 12px;">
           <a 
-            :href="`/api/books/${book.id}/chapters/${ch.number}/audio`"
+            :href="getAudioUrl(ch.number)"
             download
             class="link-btn"
           >
             ⬇️ 下载
           </a>
           <a 
-            :href="`/api/books/${book.id}/chapters/${ch.number}/script`"
+            :href="getScriptUrl(ch.number)"
             target="_blank"
             class="link-btn"
           >

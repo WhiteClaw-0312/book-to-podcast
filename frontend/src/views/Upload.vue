@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import { apiFetch } from '../api'
 
 const router = useRouter()
 const apiKey = ref('')
@@ -46,18 +46,21 @@ const upload = async () => {
   form.append('api_key', apiKey.value)
   
   try {
-    const res = await axios.post('/api/books', form, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+    const res = await apiFetch('/api/books', {
+      method: 'POST',
+      body: form,
+      headers: {} // 让浏览器自动设置 multipart/form-data
     })
     
-    bookId.value = res.data.id
+    const data = await res.json()
+    bookId.value = data.id
     status.value = 'ocr'
     
     // 开始轮询状态
     pollStatus()
     
   } catch (e: any) {
-    alert('上传失败: ' + (e.response?.data?.detail || e.message))
+    alert('上传失败: ' + e.message)
     status.value = 'idle'
     uploading.value = false
   }
@@ -67,8 +70,8 @@ const upload = async () => {
 const pollStatus = async () => {
   const timer = setInterval(async () => {
     try {
-      const res = await axios.get(`/api/books/${bookId.value}`)
-      const data = res.data
+      const res = await apiFetch(`/api/books/${bookId.value}`)
+      const data = await res.json()
       
       progress.value = data.ocr_progress
       
