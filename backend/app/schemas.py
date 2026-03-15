@@ -92,7 +92,7 @@ class ChapterDetailResponse(BaseModel):
 
 class GenerateRequest(BaseModel):
     chapters: List[int]
-    api_key: str
+    api_key: str = ""  # 可选，token 认证时不需要
 
 
 class GenerateResponse(BaseModel):

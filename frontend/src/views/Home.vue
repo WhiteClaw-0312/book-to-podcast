@@ -13,6 +13,7 @@ const authMode = ref<'login' | 'register'>('login')
 
 // 后端状态
 const backendOnline = ref(false)
+const showCertHint = ref(false)
 
 // 文件上传
 const file = ref<File | null>(null)
@@ -24,9 +25,29 @@ const checkBackend = async () => {
   try {
     const res = await apiFetch('/health')
     backendOnline.value = res.ok
+    if (res.ok) {
+      showCertHint.value = false
+    }
   } catch {
     backendOnline.value = false
   }
+}
+
+// 接受证书
+const acceptCertificate = () => {
+  // 打开一个新窗口访问后端 API，让浏览器接受证书
+  const certUrl = `${import.meta.env.VITE_API_BASE}/health`
+  const win = window.open(certUrl, '_blank')
+  // 提示用户
+  if (win) {
+    alert('请在打开的页面中点击"高级" → "继续访问"，然后刷新本页面')
+  }
+}
+
+// 刷新状态
+const refreshStatus = () => {
+  showCertHint.value = false
+  checkBackend()
 }
 
 // 检查用户登录状态
@@ -150,7 +171,12 @@ onMounted(() => {
         <p class="site-subtitle">AI 图书转播客 · 一键生成</p>
       </div>
       <div class="header-right">
-        <div class="status-badge" :class="backendOnline ? 'online' : 'offline'">
+        <div 
+          class="status-badge" 
+          :class="backendOnline ? 'online' : 'offline'"
+          @click="backendOnline ? null : (showCertHint = true)"
+          :title="backendOnline ? '后端服务正常运行' : '点击查看解决方案'"
+        >
           {{ backendOnline ? '● 在线' : '○ 离线' }}
         </div>
         <div v-if="user" class="user-info">
@@ -257,6 +283,36 @@ onMounted(() => {
       @close="showAuthModal = false"
       @success="onAuthSuccess"
     />
+    
+    <!-- 离线提示对话框 -->
+    <div v-if="showCertHint" class="modal-overlay" @click.self="showCertHint = false">
+      <div class="modal-content cert-hint-modal">
+        <div class="modal-header">
+          <h2>🔒 连接问题</h2>
+          <button class="close-btn" @click="showCertHint = false">×</button>
+        </div>
+        <div class="cert-hint-body">
+          <p class="hint-title">后端服务暂时无法访问</p>
+          <p class="hint-desc">可能是以下原因之一：</p>
+          <ul class="hint-list">
+            <li>🔒 <strong>SSL 证书未信任</strong> - 首次访问需要接受证书</li>
+            <li>🌐 <strong>网络问题</strong> - 检查网络连接</li>
+            <li>⚙️ <strong>服务维护中</strong> - 请稍后再试</li>
+          </ul>
+          <div class="hint-actions">
+            <button class="btn-primary" @click="acceptCertificate">
+              🔓 接受安全证书
+            </button>
+            <button class="btn-secondary" @click="refreshStatus">
+              🔄 刷新状态
+            </button>
+          </div>
+          <p class="hint-note">
+            💡 点击"接受安全证书"后，在新页面中点击"高级" → "继续访问"即可
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -517,5 +573,104 @@ onMounted(() => {
     width: 100%;
     justify-content: space-between;
   }
+}
+
+/* 离线提示弹窗 */
+.cert-hint-modal {
+  max-width: 480px;
+}
+
+.cert-hint-body {
+  padding: 20px 0;
+}
+
+.hint-title {
+  color: #ef5350;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.hint-desc {
+  color: #a5d6a7;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.hint-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px 0;
+}
+
+.hint-list li {
+  color: #e8f5e9;
+  font-size: 13px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(76, 175, 80, 0.1);
+}
+
+.hint-list li:last-child {
+  border-bottom: none;
+}
+
+.hint-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.hint-actions .btn-primary {
+  flex: 1;
+  padding: 12px;
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.hint-actions .btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+}
+
+.hint-actions .btn-secondary {
+  flex: 1;
+  padding: 12px;
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 8px;
+  color: #81c784;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.hint-actions .btn-secondary:hover {
+  background: rgba(76, 175, 80, 0.3);
+}
+
+.hint-note {
+  color: #81c784;
+  font-size: 12px;
+  text-align: center;
+  background: rgba(76, 175, 80, 0.1);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 0;
+}
+
+.status-badge.offline {
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.status-badge.offline:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 12px rgba(244, 67, 54, 0.4);
 }
 </style>

@@ -2,7 +2,7 @@
 import json
 import asyncio
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks
@@ -10,13 +10,14 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import APIKey, Book, Chapter, UsageLog
+from ..models import APIKey, Book, Chapter, UsageLog, User
 from ..schemas import (
     BookResponse, BookStatusResponse, ChapterResponse,
     GenerateRequest, GenerateResponse, MessageResponse
 )
 from ..services import OCRService, LLMService, TTSService
 from ..config import settings
+from .auth import get_current_user, get_optional_user, active_tokens
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 
@@ -39,16 +40,25 @@ def verify_api_key(api_key: str, db: Session) -> APIKey:
 @router.post("", response_model=BookResponse)
 async def upload_book(
     file: UploadFile = File(...),
-    api_key: str = Form(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
 ):
-    """上传书籍"""
+    """上传书籍（支持 token 认证）"""
     
-    # 验证
+    # 验证登录
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    # 获取用户的 API Key
+    api_key = user.api_key
     key = verify_api_key(api_key, db)
     
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(400, "只支持 PDF 文件")
+    # 支持多种文件格式
+    allowed_extensions = ['.pdf', '.txt', '.md']
+    file_ext = '.' + file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    
+    if file_ext not in allowed_extensions:
+        raise HTTPException(400, f"只支持 {'/'.join(allowed_extensions)} 文件")
     
     if file.size and file.size > settings.MAX_FILE_SIZE:
         raise HTTPException(400, "文件大小超过限制（100MB）")
@@ -66,8 +76,8 @@ async def upload_book(
     # 创建记录
     book = Book(
         id=book_id,
-        api_key=api_key,
-        title=file.filename.replace(".pdf", ""),
+        api_key=api_key,  # 使用用户的 api_key
+        title=file.filename.rsplit('.', 1)[0],  # 去掉扩展名
         filename=file.filename,
         file_path=str(file_path),
         status="pending"
@@ -191,35 +201,47 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
 async def generate_podcast(
     book_id: str,
     request: GenerateRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
 ):
-    """生成播客"""
+    """生成播客（支持 token 认证）"""
     
-    # 验证
-    key = verify_api_key(request.api_key, db)
+    # 验证登录
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    # 获取用户的 API Key
+    api_key = user.api_key
+    key = verify_api_key(api_key, db)
     
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(404, "书籍不存在")
     
-    if book.api_key != request.api_key:
+    if book.api_key != api_key:
         raise HTTPException(403, "无权操作此书籍")
     
     if book.status not in ["ready", "partial", "completed"]:
         raise HTTPException(400, f"书籍状态不正确: {book.status}")
     
-    # 检查余额
+    # 检查余额（免费额度 + 付费余额）
+    total_balance = user.free_quota + key.balance
     cost = len(request.chapters)
-    if key.balance < cost:
-        raise HTTPException(400, f"余额不足，需要 {cost} 次，当前余额 {key.balance} 次")
+    if total_balance < cost:
+        raise HTTPException(400, f"余额不足，需要 {cost} 次，当前余额 {total_balance} 次")
     
-    # 扣费
-    key.balance -= cost
+    # 扣费（优先使用免费额度）
+    if user.free_quota >= cost:
+        user.free_quota -= cost
+    else:
+        remaining = cost - user.free_quota
+        user.free_quota = 0
+        key.balance -= remaining
     key.total_used += cost
     db.commit()
     
     # 启动生成任务
-    run_generate_chapters(book_id, request.chapters, request.api_key)
+    run_generate_chapters(book_id, request.chapters, api_key)
     
     return GenerateResponse(
         message=f"开始生成 {cost} 章",

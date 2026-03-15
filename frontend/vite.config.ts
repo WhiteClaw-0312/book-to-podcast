@@ -2,6 +2,9 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+// 根据环境变量决定 base 路径
+const base = process.env.VITE_BASE_PATH || '/book-to-podcast/'
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -9,7 +12,7 @@ export default defineConfig({
       '@': resolve(__dirname, 'src')
     }
   },
-  base: '/book-to-podcast/',
+  base,
   server: {
     port: 3000,
     proxy: {

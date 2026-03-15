@@ -91,7 +91,7 @@ def get_optional_user(
     return db.query(User).filter(User.id == user_id).first()
 
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register")
 async def register(data: RegisterRequest, db: Session = Depends(get_db)):
     """用户注册"""
     # 检查邮箱是否已注册
@@ -122,14 +122,21 @@ async def register(data: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     
-    return UserResponse(
-        id=user.id,
-        email=user.email,
-        nickname=user.nickname,
-        api_key=user.api_key,
-        balance=api_key.balance,
-        free_quota=user.free_quota
-    )
+    # 生成token（与登录保持一致）
+    token = generate_token()
+    active_tokens[token] = user.id
+    
+    return {
+        "token": token,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "nickname": user.nickname,
+            "api_key": user.api_key,
+            "balance": api_key.balance,
+            "free_quota": user.free_quota
+        }
+    }
 
 
 @router.post("/login")
