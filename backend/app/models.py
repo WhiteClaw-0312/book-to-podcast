@@ -21,6 +21,26 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
+class TaskQueue(Base):
+    """任务队列"""
+    __tablename__ = "task_queue"
+    
+    id = Column(String(16), primary_key=True, default=generate_id)
+    book_id = Column(String(16), ForeignKey("books.id"), index=True)
+    chapter_number = Column(Integer)
+    task_type = Column(String(20))  # script, audio
+    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    progress = Column(Integer, default=0)  # 0-100
+    message = Column(Text, nullable=True)
+    result = Column(Text, nullable=True)  # JSON结果
+    created_at = Column(DateTime, default=func.now())
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # 关系
+    book = relationship("Book", back_populates="tasks")
+
+
 class User(Base):
     """用户"""
     __tablename__ = "users"
@@ -82,6 +102,7 @@ class Book(Base):
     
     # 关系
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
+    tasks = relationship("TaskQueue", back_populates="book", cascade="all, delete-orphan")
     api_key_rel = relationship("APIKey", back_populates="books")
     prompt = relationship("PromptTemplate", back_populates="books")
 

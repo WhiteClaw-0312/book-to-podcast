@@ -18,6 +18,7 @@ from ..schemas import (
 from ..services import OCRService, LLMService, TTSService
 from ..config import settings
 from .auth import get_current_user, get_optional_user, active_tokens
+from ..queue_service import queue_service, run_task_in_background
 
 router = APIRouter(prefix="/api/books", tags=["books"])
 
@@ -174,27 +175,63 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
     
     chapters = db.query(Chapter).filter(Chapter.book_id == book_id).order_by(Chapter.number).all()
     
-    return BookStatusResponse(
-        id=book.id,
-        title=book.title,
-        status=book.status,
-        total_chapters=book.total_chapters,
-        completed_chapters=book.completed_chapters,
-        ocr_progress=book.ocr_progress,
-        script_progress=book.script_progress,
-        audio_progress=book.audio_progress,
-        error_message=book.error_message,
-        chapters=[
-            ChapterResponse(
-                id=ch.id,
-                number=ch.number,
-                title=ch.title,
-                status=ch.status,
-                duration=ch.duration,
-                has_audio=bool(ch.audio_path)
-            ) for ch in chapters
+    # 获取队列进度
+    queue_progress = queue_service.get_book_progress(db, book_id)
+    
+    # 获取任务列表
+    tasks = queue_service.get_book_tasks(db, book_id)
+    
+    return {
+        "id": book.id,
+        "title": book.title,
+        "status": book.status,
+        "total_chapters": book.total_chapters,
+        "completed_chapters": book.completed_chapters,
+        "ocr_progress": book.ocr_progress,
+        "script_progress": book.script_progress,
+        "audio_progress": book.audio_progress,
+        "error_message": book.error_message,
+        "queue": queue_progress,
+        "tasks": tasks,
+        "chapters": [
+            {
+                "id": ch.id,
+                "number": ch.number,
+                "title": ch.title,
+                "status": ch.status,
+                "duration": ch.duration,
+                "has_script": bool(ch.script),
+                "has_audio": bool(ch.audio_path)
+            } for ch in chapters
         ]
-    )
+    }
+
+
+@router.get("/{book_id}/progress")
+async def get_book_progress(book_id: str, db: Session = Depends(get_db)):
+    """获取生成进度（用于轮询）"""
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    # 获取队列进度
+    queue_progress = queue_service.get_book_progress(db, book_id)
+    
+    # 获取任务列表
+    tasks = queue_service.get_book_tasks(db, book_id)
+    
+    # 计算整体进度
+    total_progress = queue_progress["progress"]
+    
+    return {
+        "book_id": book_id,
+        "book_status": book.status,
+        "queue": queue_progress,
+        "tasks": tasks,
+        "overall_progress": total_progress,
+        "message": queue_progress.get("message", "")
+    }
 
 
 @router.post("/{book_id}/generate-script", response_model=GenerateResponse)
@@ -204,9 +241,8 @@ async def generate_script_only(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_optional_user)
 ):
-    """只生成文稿（不生成音频），让用户编辑后再生成音频"""
+    """生成文稿（加入队列，异步处理）"""
     
-    # 验证登录
     if not user:
         raise HTTPException(401, "请先登录")
     
@@ -220,15 +256,29 @@ async def generate_script_only(
     if book.api_key != api_key:
         raise HTTPException(403, "无权操作此书籍")
     
-    if book.status not in ["ready", "partial"]:
-        raise HTTPException(400, f"书籍状态不正确: {book.status}")
+    # 创建任务队列
+    for chapter_num in request.chapters:
+        queue_service.create_task(db, book_id, chapter_num, "script")
     
-    # 启动文稿生成任务（不扣费）
-    run_generate_script_only(book_id, request.chapters)
+    # 更新书籍状态
+    book.status = "generating_script"
+    db.commit()
+    
+    # 启动后台任务
+    for chapter_num in request.chapters:
+        task = db.query(TaskQueue).filter(
+            TaskQueue.book_id == book_id,
+            TaskQueue.chapter_number == chapter_num,
+            TaskQueue.task_type == "script",
+            TaskQueue.status == "pending"
+        ).order_by(TaskQueue.created_at.desc()).first()
+        
+        if task:
+            run_task_in_background(task.id, "script", book_id, chapter_num)
     
     return GenerateResponse(
-        message=f"开始生成 {len(request.chapters)} 章文稿",
-        cost=0,  # 文稿生成不扣费
+        message=f"已加入队列，开始生成 {len(request.chapters)} 章文稿",
+        cost=0,
         estimated_time=len(request.chapters) * 60
     )
 
@@ -240,9 +290,8 @@ async def generate_audio_only(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_optional_user)
 ):
-    """只生成音频（文稿已存在），需要扣费"""
+    """生成音频（加入队列，异步处理）"""
     
-    # 验证登录
     if not user:
         raise HTTPException(401, "请先登录")
     
@@ -269,11 +318,29 @@ async def generate_audio_only(
     key.total_used += cost
     db.commit()
     
-    # 启动音频生成任务
-    run_generate_audio_only(book_id, request.chapters, api_key)
+    # 创建任务队列
+    from ..models import TaskQueue
+    for chapter_num in request.chapters:
+        queue_service.create_task(db, book_id, chapter_num, "audio")
+    
+    # 更新书籍状态
+    book.status = "generating_audio"
+    db.commit()
+    
+    # 启动后台任务
+    for chapter_num in request.chapters:
+        task = db.query(TaskQueue).filter(
+            TaskQueue.book_id == book_id,
+            TaskQueue.chapter_number == chapter_num,
+            TaskQueue.task_type == "audio",
+            TaskQueue.status == "pending"
+        ).order_by(TaskQueue.created_at.desc()).first()
+        
+        if task:
+            run_task_in_background(task.id, "audio", book_id, chapter_num, voice_mapping=request.voice_mapping if hasattr(request, 'voice_mapping') else None)
     
     return GenerateResponse(
-        message=f"开始生成 {cost} 章音频",
+        message=f"已加入队列，开始生成 {cost} 章音频",
         cost=cost,
         estimated_time=cost * 120
     )

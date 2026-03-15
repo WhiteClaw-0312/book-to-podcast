@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, getApiUrl, getToken, getUser } from '../api'
 
@@ -133,6 +133,43 @@ const selectNone = () => {
   selectedChapters.value = []
 }
 
+// 队列进度
+const queueProgress = ref<any>(null)
+const tasks = ref<any[]>([])
+const pollingTimer = ref<any>(null)
+
+// 获取进度
+const fetchProgress = async () => {
+  try {
+    const res = await apiFetch(`/api/books/${route.params.id}/progress`)
+    const data = await res.json()
+    queueProgress.value = data.queue
+    tasks.value = data.tasks || []
+    
+    // 更新书籍状态
+    await fetchBook()
+    
+    // 如果完成，停止轮询
+    if (data.queue?.status === 'completed' || data.book_status === 'script_ready' || data.book_status === 'completed') {
+      if (pollingTimer.value) {
+        clearInterval(pollingTimer.value)
+        pollingTimer.value = null
+      }
+      generating.value = false
+    }
+  } catch (e) {
+    console.error('获取进度失败', e)
+  }
+}
+
+// 开始轮询进度
+const startPolling = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+  }
+  pollingTimer.value = setInterval(fetchProgress, 2000)
+}
+
 // 生成文稿（第一步）
 const generateScripts = async () => {
   if (!selectedCount.value) return
@@ -141,7 +178,7 @@ const generateScripts = async () => {
   
   try {
     const token = getToken()
-    await apiFetch(`/api/books/${route.params.id}/generate-script`, {
+    const res = await apiFetch(`/api/books/${route.params.id}/generate-script`, {
       method: 'POST',
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       body: JSON.stringify({
@@ -149,15 +186,13 @@ const generateScripts = async () => {
       })
     })
     
-    // 开始轮询
-    const timer = setInterval(async () => {
-      await fetchBook()
-      if (book.value?.status === 'script_ready' || book.value?.status === 'partial') {
-        clearInterval(timer)
-        generating.value = false
-        selectedChapters.value = []
-      }
-    }, 3000)
+    if (res.ok) {
+      selectedChapters.value = []
+      startPolling()
+    } else {
+      const err = await res.json()
+      throw new Error(err.detail || '生成失败')
+    }
     
   } catch (e: any) {
     alert('生成文稿失败: ' + e.message)
@@ -187,7 +222,7 @@ const confirmGenerate = async () => {
   
   try {
     const token = getToken()
-    await apiFetch(`/api/books/${route.params.id}/generate-audio`, {
+    const res = await apiFetch(`/api/books/${route.params.id}/generate-audio`, {
       method: 'POST',
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       body: JSON.stringify({
@@ -196,15 +231,13 @@ const confirmGenerate = async () => {
       })
     })
     
-    // 开始轮询
-    const timer = setInterval(async () => {
-      await fetchBook()
-      if (book.value?.status === 'completed' || book.value?.status === 'partial') {
-        clearInterval(timer)
-        generating.value = false
-        selectedChapters.value = []
-      }
-    }, 3000)
+    if (res.ok) {
+      selectedChapters.value = []
+      startPolling()
+    } else {
+      const err = await res.json()
+      throw new Error(err.detail || '生成失败')
+    }
     
   } catch (e: any) {
     alert('生成音频失败: ' + e.message)
@@ -343,8 +376,21 @@ const backToList = () => {
 onMounted(() => {
   user.value = getUser()
   fetchVoices()
-  fetchBook()
-  setInterval(fetchBook, 5000)
+  fetchBook().then(() => {
+    // 如果正在处理，开始轮询
+    if (book.value?.status === 'generating_script' || book.value?.status === 'generating_audio') {
+      generating.value = true
+      startPolling()
+    }
+  })
+})
+
+// 组件卸载时清理
+import { onUnmounted } from 'vue'
+onUnmounted(() => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+  }
 })
 </script>
 
@@ -525,19 +571,83 @@ onMounted(() => {
       <!-- 正在生成文稿 -->
       <div class="card" v-else-if="book?.status === 'generating_script'">
         <h2 class="card-title">📝 正在生成文稿...</h2>
-        <div class="progress-bar">
-          <div class="progress-bar-fill" :style="{ width: (book.script_progress || 0) + '%' }"></div>
+        
+        <!-- 整体进度 -->
+        <div class="progress-section">
+          <div class="progress-header">
+            <span class="progress-label">整体进度</span>
+            <span class="progress-percent">{{ queueProgress?.progress || 0 }}%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" :style="{ width: (queueProgress?.progress || 0) + '%' }"></div>
+          </div>
+          <div class="progress-stats">
+            <span>{{ queueProgress?.completed || 0 }} / {{ queueProgress?.total || 0 }} 章</span>
+            <span v-if="queueProgress?.processing > 0" class="processing-badge">处理中 {{ queueProgress.processing }} 章</span>
+          </div>
         </div>
-        <p class="progress-text">请稍候，文稿生成完成后可以编辑</p>
+        
+        <!-- 任务列表 -->
+        <div class="tasks-list" v-if="tasks.length > 0">
+          <div v-for="task in tasks" :key="task.id" class="task-item">
+            <div class="task-header">
+              <span class="task-chapter">第{{ task.chapter_number }}章</span>
+              <span :class="['task-status', task.status]">
+                {{ task.status === 'pending' ? '⏳ 等待中' : task.status === 'processing' ? '🔄 处理中' : task.status === 'completed' ? '✅ 完成' : '❌ 失败' }}
+              </span>
+            </div>
+            <div v-if="task.status === 'processing'" class="task-progress">
+              <div class="mini-progress-bar">
+                <div class="mini-progress-fill" :style="{ width: task.progress + '%' }"></div>
+              </div>
+              <span class="mini-progress-text">{{ task.progress }}%</span>
+            </div>
+            <div v-if="task.message" class="task-message">{{ task.message }}</div>
+          </div>
+        </div>
+        
+        <p class="progress-hint">💡 您可以切换到其他页面，稍后回来查看进度</p>
       </div>
 
       <!-- 正在生成音频 -->
       <div class="card" v-else-if="book?.status === 'generating_audio'">
         <h2 class="card-title">🎙️ 正在生成音频...</h2>
-        <div class="progress-bar">
-          <div class="progress-bar-fill" :style="{ width: (book.audio_progress || 0) + '%' }"></div>
+        
+        <!-- 整体进度 -->
+        <div class="progress-section">
+          <div class="progress-header">
+            <span class="progress-label">整体进度</span>
+            <span class="progress-percent">{{ queueProgress?.progress || 0 }}%</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill audio" :style="{ width: (queueProgress?.progress || 0) + '%' }"></div>
+          </div>
+          <div class="progress-stats">
+            <span>{{ queueProgress?.completed || 0 }} / {{ queueProgress?.total || 0 }} 章</span>
+            <span v-if="queueProgress?.processing > 0" class="processing-badge">处理中 {{ queueProgress.processing }} 章</span>
+          </div>
         </div>
-        <p class="progress-text">{{ book.completed_chapters }} / {{ book.total_chapters }} 章完成</p>
+        
+        <!-- 任务列表 -->
+        <div class="tasks-list" v-if="tasks.length > 0">
+          <div v-for="task in tasks" :key="task.id" class="task-item">
+            <div class="task-header">
+              <span class="task-chapter">第{{ task.chapter_number }}章</span>
+              <span :class="['task-status', task.status]">
+                {{ task.status === 'pending' ? '⏳ 等待中' : task.status === 'processing' ? '🔄 处理中' : task.status === 'completed' ? '✅ 完成' : '❌ 失败' }}
+              </span>
+            </div>
+            <div v-if="task.status === 'processing'" class="task-progress">
+              <div class="mini-progress-bar">
+                <div class="mini-progress-fill audio" :style="{ width: task.progress + '%' }"></div>
+              </div>
+              <span class="mini-progress-text">{{ task.progress }}%</span>
+            </div>
+            <div v-if="task.message" class="task-message">{{ task.message }}</div>
+          </div>
+        </div>
+        
+        <p class="progress-hint">💡 您可以切换到其他页面，稍后回来查看进度</p>
       </div>
 
       <!-- 处理中（旧流程兼容） -->
@@ -1158,5 +1268,141 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* 进度显示样式 */
+.progress-section {
+  margin: 24px 0;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.progress-label {
+  color: #a5d6a7;
+  font-size: 14px;
+}
+
+.progress-percent {
+  color: #4caf50;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.progress-bar-container {
+  height: 12px;
+  background: rgba(76, 175, 80, 0.1);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4caf50, #81c784);
+  border-radius: 6px;
+  transition: width 0.5s ease;
+}
+
+.progress-bar-fill.audio {
+  background: linear-gradient(90deg, #2196f3, #64b5f6);
+}
+
+.progress-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  color: #81c784;
+  font-size: 12px;
+}
+
+.processing-badge {
+  background: rgba(255, 152, 0, 0.2);
+  color: #ffb74d;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.tasks-list {
+  margin-top: 20px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.task-item {
+  background: rgba(0, 30, 20, 0.4);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+}
+
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.task-chapter {
+  color: #e8f5e9;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.task-status {
+  font-size: 12px;
+}
+
+.task-status.pending { color: #ffb74d; }
+.task-status.processing { color: #64b5f6; }
+.task-status.completed { color: #81c784; }
+.task-status.failed { color: #ef5350; }
+
+.task-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mini-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(76, 175, 80, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mini-progress-fill {
+  height: 100%;
+  background: #4caf50;
+  transition: width 0.3s;
+}
+
+.mini-progress-fill.audio {
+  background: #2196f3;
+}
+
+.mini-progress-text {
+  color: #81c784;
+  font-size: 11px;
+  min-width: 30px;
+}
+
+.task-message {
+  color: #a5d6a7;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.progress-hint {
+  text-align: center;
+  color: #666;
+  font-size: 12px;
+  margin-top: 16px;
 }
 </style>
