@@ -36,12 +36,19 @@ const checkBackend = async () => {
 // 接受证书
 const acceptCertificate = () => {
   // 打开一个新窗口访问后端 API，让浏览器接受证书
-  const certUrl = `${import.meta.env.VITE_API_BASE}/health`
-  const win = window.open(certUrl, '_blank')
-  // 提示用户
+  const httpsUrl = `https://139.196.211.206/health`
+  const win = window.open(httpsUrl, '_blank')
   if (win) {
-    alert('请在打开的页面中点击"高级" → "继续访问"，然后刷新本页面')
+    showCertHint.value = false
+    setTimeout(() => {
+      alert('请在新打开的页面中点击"高级" → "继续访问"，接受证书后刷新本页面。\n\n或者直接访问: http://139.196.211.206')
+    }, 500)
   }
+}
+
+// 切换到服务器版本
+const switchToServer = () => {
+  window.location.href = 'http://139.196.211.206/'
 }
 
 // 刷新状态
@@ -49,6 +56,9 @@ const refreshStatus = () => {
   showCertHint.value = false
   checkBackend()
 }
+
+// 检测是否在 GitHub Pages 上
+const isGitHubPages = window.location.hostname.includes('github.io')
 
 // 检查用户登录状态
 const checkUser = () => {
@@ -293,21 +303,30 @@ onMounted(() => {
         </div>
         <div class="cert-hint-body">
           <p class="hint-title">后端服务暂时无法访问</p>
-          <p class="hint-desc">可能是以下原因之一：</p>
-          <ul class="hint-list">
-            <li>🔒 <strong>SSL 证书未信任</strong> - 首次访问需要接受证书</li>
-            <li>🌐 <strong>网络问题</strong> - 检查网络连接</li>
-            <li>⚙️ <strong>服务维护中</strong> - 请稍后再试</li>
-          </ul>
+          <p class="hint-desc" v-if="isGitHubPages">
+            GitHub Pages 使用 HTTPS，但服务器证书是自签名的。<br>
+            请选择以下方式访问：
+          </p>
+          <p class="hint-desc" v-else>
+            可能是以下原因之一：
+          </p>
+          
           <div class="hint-actions">
-            <button class="btn-primary" @click="acceptCertificate">
+            <button class="btn-primary" @click="switchToServer" v-if="isGitHubPages">
+              🚀 切换到服务器版本
+            </button>
+            <button class="btn-secondary" @click="acceptCertificate">
               🔓 接受安全证书
             </button>
-            <button class="btn-secondary" @click="refreshStatus">
+            <button class="btn-text" @click="refreshStatus">
               🔄 刷新状态
             </button>
           </div>
-          <p class="hint-note">
+          
+          <p class="hint-note" v-if="isGitHubPages">
+            💡 推荐点击"切换到服务器版本"，将跳转到 http://139.196.211.206
+          </p>
+          <p class="hint-note" v-else>
             💡 点击"接受安全证书"后，在新页面中点击"高级" → "继续访问"即可
           </p>
         </div>
@@ -616,18 +635,19 @@ onMounted(() => {
 
 .hint-actions {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   margin-bottom: 16px;
 }
 
 .hint-actions .btn-primary {
-  flex: 1;
-  padding: 12px;
+  width: 100%;
+  padding: 14px;
   background: linear-gradient(135deg, #4caf50, #2e7d32);
   border: none;
   border-radius: 8px;
   color: white;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s;
@@ -639,7 +659,7 @@ onMounted(() => {
 }
 
 .hint-actions .btn-secondary {
-  flex: 1;
+  width: 100%;
   padding: 12px;
   background: rgba(76, 175, 80, 0.2);
   border: 1px solid rgba(76, 175, 80, 0.3);
@@ -652,6 +672,17 @@ onMounted(() => {
 
 .hint-actions .btn-secondary:hover {
   background: rgba(76, 175, 80, 0.3);
+}
+
+.hint-actions .btn-text {
+  width: 100%;
+  padding: 10px;
+  background: none;
+  border: none;
+  color: #81c784;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .hint-note {
