@@ -34,15 +34,26 @@ const checkBackend = async () => {
 }
 
 // 接受证书
-const acceptCertificate = () => {
-  // 打开一个新窗口访问后端 API，让浏览器接受证书
-  const httpsUrl = `https://139.196.211.206/health`
-  const win = window.open(httpsUrl, '_blank')
-  if (win) {
-    showCertHint.value = false
-    setTimeout(() => {
-      alert('请在新打开的页面中点击"高级" → "继续访问"，接受证书后刷新本页面。\n\n或者直接访问: http://139.196.211.206')
-    }, 500)
+const acceptCertificate = async () => {
+  // 尝试直接访问 HTTPS API
+  try {
+    // 先尝试获取音色列表（这个请求会触发证书错误）
+    const res = await fetch('https://139.196.211.206/api/voices')
+    if (res.ok) {
+      backendOnline.value = true
+      showCertHint.value = false
+      alert('✅ 证书已接受，服务已连接！')
+      return
+    }
+  } catch (e) {
+    // 如果失败，打开新窗口让用户手动接受
+    const httpsUrl = 'https://139.196.211.206/health'
+    const win = window.open(httpsUrl, '_blank')
+    if (win) {
+      setTimeout(() => {
+        alert('请在新打开的页面中：\n1. 点击"高级"或"详细信息"\n2. 点击"继续访问"或"接受风险"\n3. 然后回到本页面点击"刷新状态"')
+      }, 500)
+    }
   }
 }
 
@@ -52,9 +63,13 @@ const switchToServer = () => {
 }
 
 // 刷新状态
-const refreshStatus = () => {
+const refreshStatus = async () => {
   showCertHint.value = false
-  checkBackend()
+  backendOnline.value = false
+  await checkBackend()
+  if (backendOnline.value) {
+    alert('✅ 服务连接成功！')
+  }
 }
 
 // 检测是否在 GitHub Pages 上

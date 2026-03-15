@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { apiFetch, getApiUrl } from '../api'
+import { apiFetch, getApiUrl, getToken, getUser } from '../api'
 
 const route = useRoute()
 const router = useRouter()
-const apiKey = ref('')
+const user = ref<any>(null)
 
 interface Dialogue {
   speaker: string
@@ -36,10 +36,27 @@ interface BookData {
   chapters: Chapter[]
 }
 
+interface Voice {
+  id: string
+  speaker_name: string
+  voice_id: string
+  voice_name: string
+  gender: string
+  description: string
+}
+
 const book = ref<BookData | null>(null)
 const loading = ref(true)
 const generating = ref(false)
 const selectedChapters = ref<number[]>([])
+
+// 音色相关
+const voices = ref<Voice[]>([])
+const showVoiceSelector = ref(false)
+const voiceMapping = ref<Record<string, string>>({
+  '小北': 'zh-CN-XiaoxiaoNeural',
+  '阿南': 'zh-CN-YunxiNeural'
+})
 
 // 播放器状态
 const currentChapter = ref<Chapter | null>(null)
@@ -53,6 +70,24 @@ const subtitleContainer = ref<HTMLElement | null>(null)
 
 // 已选择的章节数
 const selectedCount = computed(() => selectedChapters.value.length)
+
+// 女声音色列表
+const femaleVoices = computed(() => voices.value.filter(v => v.gender === 'female'))
+
+// 男声音色列表
+const maleVoices = computed(() => voices.value.filter(v => v.gender === 'male'))
+
+// 获取音色列表
+const fetchVoices = async () => {
+  try {
+    const res = await apiFetch('/api/voices')
+    if (res.ok) {
+      voices.value = await res.json()
+    }
+  } catch (e) {
+    console.error('获取音色失败', e)
+  }
+}
 
 // 获取书籍数据
 const fetchBook = async () => {
@@ -100,16 +135,27 @@ const selectNone = () => {
 
 // 生成播客
 const generate = async () => {
-  if (!selectedCount.value || !apiKey.value) return
+  if (!selectedCount.value) return
   
+  // 显示音色选择
+  showVoiceSelector.value = true
+}
+
+// 确认生成
+const confirmGenerate = async () => {
+  if (!selectedCount.value) return
+  
+  showVoiceSelector.value = false
   generating.value = true
   
   try {
+    const token = getToken()
     await apiFetch(`/api/books/${route.params.id}/generate`, {
       method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       body: JSON.stringify({
         chapters: selectedChapters.value,
-        api_key: apiKey.value
+        voice_mapping: voiceMapping.value
       })
     })
     
@@ -257,9 +303,8 @@ const backToList = () => {
 }
 
 onMounted(() => {
-  const saved = localStorage.getItem('apiKey')
-  if (saved) apiKey.value = saved
-  
+  user.value = getUser()
+  fetchVoices()
   fetchBook()
   setInterval(fetchBook, 5000)
 })
@@ -413,6 +458,59 @@ onMounted(() => {
         </div>
       </div>
     </template>
+
+    <!-- 音色选择弹窗 -->
+    <div v-if="showVoiceSelector" class="modal-overlay" @click.self="showVoiceSelector = false">
+      <div class="modal-content voice-modal">
+        <div class="modal-header">
+          <h2>🎭 选择音色</h2>
+          <button class="close-btn" @click="showVoiceSelector = false">×</button>
+        </div>
+        
+        <div class="voice-selector-body">
+          <p class="voice-hint">为播客中的角色选择合适的音色</p>
+          
+          <!-- 小北（女声） -->
+          <div class="voice-group">
+            <h3>👩 小北（女主持）</h3>
+            <div class="voice-options">
+              <div 
+                v-for="v in femaleVoices" 
+                :key="v.id"
+                :class="['voice-option', { selected: voiceMapping['小北'] === v.voice_id }]"
+                @click="voiceMapping['小北'] = v.voice_id"
+              >
+                <div class="voice-name">{{ v.speaker_name }}</div>
+                <div class="voice-desc">{{ v.description }}</div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 阿南（男声） -->
+          <div class="voice-group">
+            <h3>👨 阿南（男主持）</h3>
+            <div class="voice-options">
+              <div 
+                v-for="v in maleVoices" 
+                :key="v.id"
+                :class="['voice-option', { selected: voiceMapping['阿南'] === v.voice_id }]"
+                @click="voiceMapping['阿南'] = v.voice_id"
+              >
+                <div class="voice-name">{{ v.speaker_name }}</div>
+                <div class="voice-desc">{{ v.description }}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="voice-actions">
+            <button class="btn btn-secondary" @click="showVoiceSelector = false">取消</button>
+            <button class="btn btn-primary" @click="confirmGenerate">
+              🎙️ 开始生成 {{ selectedCount }} 章
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -757,5 +855,125 @@ onMounted(() => {
 
 .action-btn:hover {
   background: rgba(76, 175, 80, 0.3);
+}
+
+/* 音色选择弹窗 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: linear-gradient(135deg, #1a3a2a 0%, #0f2419 100%);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  margin: 20px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.modal-header h2 {
+  color: #4caf50;
+  margin: 0;
+  font-size: 20px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #81c784;
+  font-size: 28px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.voice-selector-body {
+  padding: 20px;
+}
+
+.voice-hint {
+  color: #81c784;
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+
+.voice-group {
+  margin-bottom: 24px;
+}
+
+.voice-group h3 {
+  color: #e8f5e9;
+  font-size: 16px;
+  margin: 0 0 12px 0;
+}
+
+.voice-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.voice-option {
+  background: rgba(0, 30, 20, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.voice-option:hover {
+  border-color: rgba(76, 175, 80, 0.5);
+  background: rgba(0, 40, 25, 0.6);
+}
+
+.voice-option.selected {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.15);
+}
+
+.voice-name {
+  color: #e8f5e9;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.voice-desc {
+  color: #81c784;
+  font-size: 12px;
+}
+
+.voice-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+@media (max-width: 500px) {
+  .voice-options {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
