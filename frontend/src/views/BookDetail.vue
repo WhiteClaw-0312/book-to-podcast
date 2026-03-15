@@ -133,7 +133,44 @@ const selectNone = () => {
   selectedChapters.value = []
 }
 
-// 生成播客
+// 生成文稿（第一步）
+const generateScripts = async () => {
+  if (!selectedCount.value) return
+  
+  generating.value = true
+  
+  try {
+    const token = getToken()
+    await apiFetch(`/api/books/${route.params.id}/generate-script`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      body: JSON.stringify({
+        chapters: selectedChapters.value
+      })
+    })
+    
+    // 开始轮询
+    const timer = setInterval(async () => {
+      await fetchBook()
+      if (book.value?.status === 'script_ready' || book.value?.status === 'partial') {
+        clearInterval(timer)
+        generating.value = false
+        selectedChapters.value = []
+      }
+    }, 3000)
+    
+  } catch (e: any) {
+    alert('生成文稿失败: ' + e.message)
+    generating.value = false
+  }
+}
+
+// 编辑文稿
+const editScript = (chapterNum: number) => {
+  router.push(`/book/${route.params.id}/script?chapter=${chapterNum}`)
+}
+
+// 生成音频（第二步，需要扣费）
 const generate = async () => {
   if (!selectedCount.value) return
   
@@ -141,7 +178,7 @@ const generate = async () => {
   showVoiceSelector.value = true
 }
 
-// 确认生成
+// 确认生成音频
 const confirmGenerate = async () => {
   if (!selectedCount.value) return
   
@@ -150,7 +187,7 @@ const confirmGenerate = async () => {
   
   try {
     const token = getToken()
-    await apiFetch(`/api/books/${route.params.id}/generate`, {
+    await apiFetch(`/api/books/${route.params.id}/generate-audio`, {
       method: 'POST',
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       body: JSON.stringify({
@@ -165,11 +202,12 @@ const confirmGenerate = async () => {
       if (book.value?.status === 'completed' || book.value?.status === 'partial') {
         clearInterval(timer)
         generating.value = false
+        selectedChapters.value = []
       }
     }, 3000)
     
   } catch (e: any) {
-    alert('生成失败: ' + e.message)
+    alert('生成音频失败: ' + e.message)
     generating.value = false
   }
 }
@@ -392,14 +430,15 @@ onMounted(() => {
         <p>加载中...</p>
       </div>
 
-      <!-- 章节选择 -->
+      <!-- 章节选择（OCR完成，尚未生成文稿） -->
       <div class="card" v-else-if="book?.status === 'ready'">
-        <h2 class="card-title">📖 选择章节 (共 {{ book.total_chapters }} 章)</h2>
+        <h2 class="card-title">📖 选择章节生成文稿</h2>
+        <p class="card-hint">第一步：生成文稿后可以编辑，确认后再生成音频</p>
         
         <div class="select-actions">
           <button class="btn btn-secondary" @click="selectAll">全选</button>
           <button class="btn btn-secondary" @click="selectNone">全不选</button>
-          <div class="select-info">已选 {{ selectedCount }} 章 · 需要 {{ selectedCount }} 次</div>
+          <div class="select-info">已选 {{ selectedCount }} 章</div>
         </div>
         
         <div class="chapter-grid">
@@ -417,14 +456,91 @@ onMounted(() => {
         
         <button 
           class="btn btn-primary generate-btn"
-          @click="generate" 
+          @click="generateScripts" 
           :disabled="!selectedCount || generating"
         >
-          {{ generating ? '⏳ 生成中...' : `🎙️ 生成选中的 ${selectedCount} 章` }}
+          {{ generating ? '⏳ 生成中...' : `📝 生成文稿（免费）` }}
         </button>
       </div>
 
-      <!-- 处理中 -->
+      <!-- 文稿就绪，等待编辑/生成音频 -->
+      <div class="card" v-else-if="book?.status === 'script_ready' || book?.status === 'partial'">
+        <h2 class="card-title">📝 文稿已就绪</h2>
+        <p class="card-hint">第二步：编辑文稿或直接生成音频（生成音频需要扣费）</p>
+        
+        <div class="chapter-list">
+          <div 
+            v-for="ch in book.chapters" 
+            :key="ch.number" 
+            class="chapter-row"
+          >
+            <div class="chapter-info">
+              <span class="chapter-num">第{{ ch.number }}章</span>
+              <span class="chapter-title">{{ ch.title }}</span>
+            </div>
+            
+            <div class="chapter-btns">
+              <button 
+                v-if="ch.has_script"
+                class="btn btn-secondary btn-sm"
+                @click.stop="editScript(ch.number)"
+              >✏️ 编辑文稿</button>
+              
+              <button 
+                v-if="ch.has_audio"
+                class="btn btn-primary btn-sm"
+                @click.stop="playChapter(ch)"
+              >🎧 播放</button>
+              
+              <label 
+                v-if="!ch.has_audio"
+                class="checkbox-label"
+                @click.stop
+              >
+                <input 
+                  type="checkbox" 
+                  :checked="selectedChapters.includes(ch.number)"
+                  @change="selectedChapters.includes(ch.number) 
+                    ? selectedChapters = selectedChapters.filter(n => n !== ch.number)
+                    : selectedChapters.push(ch.number)"
+                />
+                生成音频
+              </label>
+            </div>
+          </div>
+        </div>
+        
+        <div v-if="selectedCount > 0" class="generate-audio-section">
+          <div class="cost-info">已选 {{ selectedCount }} 章 · 需要 {{ selectedCount }} 次额度</div>
+          <button 
+            class="btn btn-primary"
+            @click="generate"
+            :disabled="generating"
+          >
+            🎙️ 生成选中章节的音频
+          </button>
+        </div>
+      </div>
+
+      <!-- 正在生成文稿 -->
+      <div class="card" v-else-if="book?.status === 'generating_script'">
+        <h2 class="card-title">📝 正在生成文稿...</h2>
+        <div class="progress-bar">
+          <div class="progress-bar-fill" :style="{ width: (book.script_progress || 0) + '%' }"></div>
+        </div>
+        <p class="progress-text">请稍候，文稿生成完成后可以编辑</p>
+      </div>
+
+      <!-- 正在生成音频 -->
+      <div class="card" v-else-if="book?.status === 'generating_audio'">
+        <h2 class="card-title">🎙️ 正在生成音频...</h2>
+        <div class="progress-bar">
+          <div class="progress-bar-fill" :style="{ width: (book.audio_progress || 0) + '%' }"></div>
+        </div>
+        <p class="progress-text">{{ book.completed_chapters }} / {{ book.total_chapters }} 章完成</p>
+      </div>
+
+      <!-- 处理中（旧流程兼容） -->
       <div class="card" v-else-if="book?.status === 'processing'">
         <h2 class="card-title">⚙️ 生成中...</h2>
         <div class="progress-bar">
@@ -434,14 +550,13 @@ onMounted(() => {
       </div>
 
       <!-- 已完成 -->
-      <div class="card" v-else-if="book?.status === 'completed' || book?.status === 'partial'">
+      <div class="card" v-else-if="book?.status === 'completed'">
         <h2 class="card-title">🎧 播客列表</h2>
         
         <div 
           v-for="ch in book.chapters" 
           :key="ch.number" 
           :class="['chapter-card', { playable: ch.has_audio }]"
-          @click="ch.has_audio && playChapter(ch)"
         >
           <div class="chapter-card-content">
             <div class="chapter-main">
@@ -450,9 +565,16 @@ onMounted(() => {
               <div class="chapter-duration">{{ formatTime(ch.duration) }}</div>
             </div>
             
-            <div class="chapter-actions">
-              <span v-if="ch.has_audio" class="play-indicator">▶ 点击播放</span>
-              <span v-else class="no-audio">未生成</span>
+            <div class="chapter-btns">
+              <button 
+                class="btn btn-secondary btn-sm"
+                @click="editScript(ch.number)"
+              >✏️ 编辑</button>
+              <button 
+                v-if="ch.has_audio"
+                class="btn btn-primary btn-sm"
+                @click="playChapter(ch)"
+              >🎧 播放</button>
             </div>
           </div>
         </div>
@@ -975,5 +1097,66 @@ onMounted(() => {
   .voice-options {
     grid-template-columns: 1fr;
   }
+}
+
+/* 新增样式 */
+.card-hint {
+  color: #81c784;
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+
+.chapter-list {
+  margin-bottom: 20px;
+}
+
+.chapter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: rgba(0, 30, 20, 0.4);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.chapter-btns {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #81c784;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.generate-audio-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+  text-align: center;
+}
+
+.cost-info {
+  color: #81c784;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.chapter-card-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 </style>

@@ -197,6 +197,88 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/{book_id}/generate-script", response_model=GenerateResponse)
+async def generate_script_only(
+    book_id: str,
+    request: GenerateRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """只生成文稿（不生成音频），让用户编辑后再生成音频"""
+    
+    # 验证登录
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    api_key = user.api_key
+    key = verify_api_key(api_key, db)
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    if book.api_key != api_key:
+        raise HTTPException(403, "无权操作此书籍")
+    
+    if book.status not in ["ready", "partial"]:
+        raise HTTPException(400, f"书籍状态不正确: {book.status}")
+    
+    # 启动文稿生成任务（不扣费）
+    run_generate_script_only(book_id, request.chapters)
+    
+    return GenerateResponse(
+        message=f"开始生成 {len(request.chapters)} 章文稿",
+        cost=0,  # 文稿生成不扣费
+        estimated_time=len(request.chapters) * 60
+    )
+
+
+@router.post("/{book_id}/generate-audio", response_model=GenerateResponse)
+async def generate_audio_only(
+    book_id: str,
+    request: GenerateRequest,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """只生成音频（文稿已存在），需要扣费"""
+    
+    # 验证登录
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    api_key = user.api_key
+    key = verify_api_key(api_key, db)
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    # 检查余额
+    total_balance = user.free_quota + key.balance
+    cost = len(request.chapters)
+    if total_balance < cost:
+        raise HTTPException(400, f"余额不足，需要 {cost} 次，当前余额 {total_balance} 次")
+    
+    # 扣费
+    if user.free_quota >= cost:
+        user.free_quota -= cost
+    else:
+        remaining = cost - user.free_quota
+        user.free_quota = 0
+        key.balance -= remaining
+    key.total_used += cost
+    db.commit()
+    
+    # 启动音频生成任务
+    run_generate_audio_only(book_id, request.chapters, api_key)
+    
+    return GenerateResponse(
+        message=f"开始生成 {cost} 章音频",
+        cost=cost,
+        estimated_time=cost * 120
+    )
+
+
 @router.post("/{book_id}/generate", response_model=GenerateResponse)
 async def generate_podcast(
     book_id: str,
@@ -251,7 +333,7 @@ async def generate_podcast(
 
 
 def run_generate_chapters(book_id: str, chapter_numbers: List[int], api_key: str):
-    """同步包装函数，在新线程中运行"""
+    """同步包装函数，在新线程中运行（文稿+音频）"""
     import threading
     import asyncio
     
@@ -265,6 +347,171 @@ def run_generate_chapters(book_id: str, chapter_numbers: List[int], api_key: str
     
     thread = threading.Thread(target=run_in_thread, daemon=True)
     thread.start()
+
+
+def run_generate_script_only(book_id: str, chapter_numbers: List[int]):
+    """只生成文稿"""
+    import threading
+    import asyncio
+    
+    def run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(generate_script_only(book_id, chapter_numbers))
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+
+
+def run_generate_audio_only(book_id: str, chapter_numbers: List[int], api_key: str):
+    """只生成音频（文稿已存在）"""
+    import threading
+    import asyncio
+    
+    def run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(generate_audio_only(book_id, chapter_numbers, api_key))
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+
+
+async def generate_script_only(book_id: str, chapter_numbers: List[int]):
+    """只生成文稿，不生成音频"""
+    from ..database import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        book = db.query(Book).filter(Book.id == book_id).first()
+        
+        for i, num in enumerate(chapter_numbers):
+            chapter = db.query(Chapter).filter(
+                Chapter.book_id == book_id,
+                Chapter.number == num
+            ).first()
+            
+            if not chapter:
+                continue
+            
+            try:
+                # 更新状态
+                chapter.status = "generating_script"
+                book.status = "generating_script"
+                book.script_progress = int((i / len(chapter_numbers)) * 100)
+                db.commit()
+                
+                # 生成文稿
+                script = await llm_service.generate_script(
+                    book_title=book.title,
+                    author=book.author,
+                    chapter_number=chapter.number,
+                    chapter_title=chapter.title,
+                    content=chapter.content or ""
+                )
+                
+                chapter.script = json.dumps(script, ensure_ascii=False)
+                chapter.status = "script_ready"  # 文稿就绪，等待用户编辑
+                book.script_progress = int(((i + 1) / len(chapter_numbers)) * 100)
+                db.commit()
+                
+            except Exception as e:
+                chapter.status = "failed"
+                chapter.error_message = str(e)
+                db.commit()
+        
+        # 更新书籍状态
+        ready_count = db.query(Chapter).filter(
+            Chapter.book_id == book_id,
+            Chapter.status == "script_ready"
+        ).count()
+        
+        book.status = "script_ready" if ready_count == book.total_chapters else "partial"
+        db.commit()
+        
+    finally:
+        db.close()
+
+
+async def generate_audio_only(book_id: str, chapter_numbers: List[int], api_key: str):
+    """只生成音频（文稿已存在）"""
+    from ..database import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        book = db.query(Book).filter(Book.id == book_id).first()
+        
+        for i, num in enumerate(chapter_numbers):
+            chapter = db.query(Chapter).filter(
+                Chapter.book_id == book_id,
+                Chapter.number == num
+            ).first()
+            
+            if not chapter or not chapter.script:
+                continue
+            
+            try:
+                # 更新状态
+                chapter.status = "generating_audio"
+                book.status = "generating_audio"
+                book.audio_progress = int((i / len(chapter_numbers)) * 100)
+                db.commit()
+                
+                # 获取文稿
+                script = json.loads(chapter.script)
+                
+                # 合成音频
+                audio_dir = settings.PODCASTS_DIR / book_id
+                audio_dir.mkdir(exist_ok=True)
+                audio_path = str(audio_dir / f"chapter_{num:02d}.mp3")
+                
+                duration = await tts_service.synthesize_chapter(
+                    script.get("dialogues", []),
+                    audio_path
+                )
+                
+                # 更新完成
+                chapter.audio_path = audio_path
+                chapter.duration = duration
+                chapter.status = "completed"
+                db.commit()
+                
+                # 记录用量
+                log = UsageLog(
+                    api_key=api_key,
+                    book_id=book_id,
+                    chapter_id=chapter.id,
+                    action="generate_audio",
+                    cost=1,
+                    details=json.dumps({"chapter": num, "duration": duration})
+                )
+                db.add(log)
+                db.commit()
+                
+            except Exception as e:
+                chapter.status = "failed"
+                chapter.error_message = str(e)
+                db.commit()
+        
+        # 更新书籍状态
+        completed = db.query(Chapter).filter(
+            Chapter.book_id == book_id,
+            Chapter.status == "completed"
+        ).count()
+        
+        book.completed_chapters = completed
+        book.status = "completed" if completed == book.total_chapters else "partial"
+        book.audio_progress = 100
+        db.commit()
+        
+    finally:
+        db.close()
 
 
 async def generate_chapters(book_id: str, chapter_numbers: List[int], api_key: str):
@@ -396,3 +643,77 @@ async def get_script(book_id: str, chapter_num: int, db: Session = Depends(get_d
         raise HTTPException(404, "文稿不存在")
     
     return json.loads(chapter.script)
+
+
+@router.put("/{book_id}/chapters/{chapter_num}/script")
+async def update_script(
+    book_id: str, 
+    chapter_num: int, 
+    data: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """更新文稿（用户编辑后保存）"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    chapter = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.number == chapter_num
+    ).first()
+    
+    if not chapter:
+        raise HTTPException(404, "章节不存在")
+    
+    # 保存用户编辑的文稿
+    chapter.script = json.dumps(data.get("dialogues", []), ensure_ascii=False)
+    chapter.script_edited = chapter.script  # 标记为用户编辑过
+    db.commit()
+    
+    return {"message": "文稿已保存"}
+
+
+@router.get("/my-books")
+async def get_my_books(
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """获取用户的所有书籍（历史记录）"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    # 查询用户的书籍
+    books = db.query(Book).filter(
+        Book.api_key == user.api_key
+    ).order_by(Book.created_at.desc()).all()
+    
+    result = []
+    for book in books:
+        chapters = db.query(Chapter).filter(
+            Chapter.book_id == book.id
+        ).order_by(Chapter.number).all()
+        
+        result.append({
+            "id": book.id,
+            "title": book.title,
+            "status": book.status,
+            "total_chapters": book.total_chapters,
+            "completed_chapters": book.completed_chapters,
+            "created_at": book.created_at.isoformat() if book.created_at else None,
+            "expires_at": book.expires_at.isoformat() if book.expires_at else None,
+            "chapters": [
+                {
+                    "id": ch.id,
+                    "number": ch.number,
+                    "title": ch.title,
+                    "status": ch.status,
+                    "has_script": bool(ch.script),
+                    "has_audio": bool(ch.audio_path),
+                    "duration": ch.duration
+                } for ch in chapters
+            ]
+        })
+    
+    return result
