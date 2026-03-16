@@ -708,7 +708,8 @@ onUnmounted(() => {
 
       <!-- 已完成 -->
       <div class="card" v-else-if="book?.status === 'completed'">
-        <h2 class="card-title">🎧 播客列表</h2>
+        <h2 class="card-title">🎧 播客已就绪</h2>
+        <p class="card-hint">您可以查看文稿、编辑内容或播放音频</p>
         
         <div 
           v-for="ch in book.chapters" 
@@ -719,19 +720,20 @@ onUnmounted(() => {
             <div class="chapter-main">
               <div class="chapter-number">第{{ ch.number }}章</div>
               <div class="chapter-title">{{ ch.title }}</div>
-              <div class="chapter-duration">{{ formatTime(ch.duration) }}</div>
+              <div class="chapter-duration" v-if="ch.has_audio">{{ formatTime(ch.duration) }}</div>
             </div>
             
             <div class="chapter-btns">
               <button 
+                v-if="ch.has_script"
                 class="btn btn-secondary btn-sm"
                 @click="editScript(ch.number)"
-              >✏️ 编辑</button>
+              >📝 查看文稿</button>
               <button 
                 v-if="ch.has_audio"
                 class="btn btn-primary btn-sm"
                 @click="playChapter(ch)"
-              >🎧 播放</button>
+              >🎧 播放音频</button>
             </div>
           </div>
         </div>

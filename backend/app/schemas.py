@@ -75,7 +75,8 @@ class ChapterResponse(BaseModel):
     title: str
     status: str
     duration: float
-    has_audio: bool
+    has_script: bool = False
+    has_audio: bool = False
 
     class Config:
         from_attributes = True

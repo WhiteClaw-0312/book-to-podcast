@@ -189,6 +189,9 @@ onMounted(() => {
           {{ backendOnline ? '● 在线' : '○ 离线' }}
         </div>
         <div v-if="user" class="user-info">
+          <button class="history-btn" @click="router.push('/history')" title="历史记录">
+            📜 历史
+          </button>
           <span class="user-name">{{ user.nickname || user.email }}</span>
           <span class="user-balance">{{ user.balance + user.free_quota }}次</span>
           <button class="logout-btn" @click="logout">退出</button>
@@ -384,6 +387,21 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.history-btn {
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: #81c784;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.3s;
+}
+
+.history-btn:hover {
+  background: rgba(76, 175, 80, 0.3);
 }
 
 .user-name {
