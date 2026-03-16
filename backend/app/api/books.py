@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import APIKey, Book, Chapter, UsageLog, User
+from ..models import APIKey, Book, Chapter, UsageLog, User, TaskQueue, PromptTemplate
 from ..schemas import (
     BookResponse, BookStatusResponse, ChapterResponse,
     GenerateRequest, GenerateResponse, MessageResponse
@@ -184,6 +184,7 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
     return {
         "id": book.id,
         "title": book.title,
+        "author": book.author,
         "status": book.status,
         "total_chapters": book.total_chapters,
         "completed_chapters": book.completed_chapters,
@@ -191,6 +192,7 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
         "script_progress": book.script_progress,
         "audio_progress": book.audio_progress,
         "error_message": book.error_message,
+        "prompt_id": book.prompt_id,
         "queue": queue_progress,
         "tasks": tasks,
         "chapters": [
@@ -205,6 +207,32 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
             } for ch in chapters
         ]
     }
+
+
+@router.patch("/{book_id}")
+async def update_book(
+    book_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """更新书籍设置（如 prompt_id）"""
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    # 验证权限
+    if book.api_key != user.api_key:
+        raise HTTPException(403, "无权修改此书籍")
+    
+    # 更新允许的字段
+    if "prompt_id" in data:
+        book.prompt_id = data["prompt_id"]
+    
+    db.commit()
+    db.refresh(book)
+    
+    return {"message": "更新成功", "book_id": book_id, "prompt_id": book.prompt_id}
 
 
 @router.get("/{book_id}/progress")

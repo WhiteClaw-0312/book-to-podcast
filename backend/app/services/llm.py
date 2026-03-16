@@ -7,7 +7,8 @@ from openai import OpenAI
 from ..config import settings
 
 
-SYSTEM_PROMPT = """你是一位专业的播客编剧，擅长将图书内容转换为引人入胜的双人对话式播客。
+# 默认系统Prompt
+DEFAULT_SYSTEM_PROMPT = """你是一位专业的播客编剧，擅长将图书内容转换为引人入胜的双人对话式播客。
 
 主持人设定：
 - 小北：活泼好奇，善于提问，用"诶~"、"哇"、"真的吗"等语气词增加互动感
@@ -62,12 +63,16 @@ class LLMService:
         author: str,
         chapter_number: int,
         chapter_title: str,
-        content: str
+        content: str,
+        custom_prompt: Optional[str] = None
     ) -> Dict:
         """生成播客文稿"""
         
         # 限制内容长度
         content = content[:6000]
+        
+        # 使用自定义Prompt或默认Prompt
+        system_prompt = custom_prompt or DEFAULT_SYSTEM_PROMPT
         
         prompt = CHAPTER_PROMPT_TEMPLATE.format(
             book_title=book_title,
@@ -83,7 +88,7 @@ class LLMService:
                 lambda: self.client.chat.completions.create(
                     model=settings.QWEN_MODEL,
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.7,

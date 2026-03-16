@@ -89,6 +89,48 @@ const fetchVoices = async () => {
   }
 }
 
+// 预览音色
+const previewingVoice = ref<string | null>(null)
+const previewAudio = ref<HTMLAudioElement | null>(null)
+
+const previewVoice = async (voiceId: string) => {
+  // 停止之前的预览
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value = null
+  }
+  
+  previewingVoice.value = voiceId
+  
+  try {
+    const audioUrl = getApiUrl(`/api/voices/edge-id/${voiceId}/preview`)
+    const audio = new Audio(audioUrl)
+    previewAudio.value = audio
+    
+    audio.onended = () => {
+      previewingVoice.value = null
+    }
+    
+    audio.onerror = () => {
+      previewingVoice.value = null
+      alert('预览失败，请稍后重试')
+    }
+    
+    await audio.play()
+  } catch (e) {
+    previewingVoice.value = null
+    console.error('预览失败', e)
+  }
+}
+
+const stopPreview = () => {
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value = null
+  }
+  previewingVoice.value = null
+}
+
 // 获取书籍数据
 const fetchBook = async () => {
   try {
@@ -390,6 +432,11 @@ import { onUnmounted } from 'vue'
 onUnmounted(() => {
   if (pollingTimer.value) {
     clearInterval(pollingTimer.value)
+  }
+  // 停止预览音频
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value = null
   }
 })
 </script>
@@ -709,10 +756,19 @@ onUnmounted(() => {
               <div 
                 v-for="v in femaleVoices" 
                 :key="v.id"
-                :class="['voice-option', { selected: voiceMapping['小北'] === v.voice_id }]"
+                :class="['voice-option', { selected: voiceMapping['小北'] === v.voice_id, previewing: previewingVoice === v.voice_id }]"
                 @click="voiceMapping['小北'] = v.voice_id"
               >
-                <div class="voice-name">{{ v.speaker_name }}</div>
+                <div class="voice-header">
+                  <div class="voice-name">{{ v.speaker_name }}</div>
+                  <button 
+                    class="preview-btn"
+                    @click.stop="previewingVoice === v.voice_id ? stopPreview() : previewVoice(v.voice_id)"
+                    :title="previewingVoice === v.voice_id ? '停止预览' : '试听'"
+                  >
+                    {{ previewingVoice === v.voice_id ? '⏹️' : '▶️' }}
+                  </button>
+                </div>
                 <div class="voice-desc">{{ v.description }}</div>
               </div>
             </div>
@@ -725,10 +781,19 @@ onUnmounted(() => {
               <div 
                 v-for="v in maleVoices" 
                 :key="v.id"
-                :class="['voice-option', { selected: voiceMapping['阿南'] === v.voice_id }]"
+                :class="['voice-option', { selected: voiceMapping['阿南'] === v.voice_id, previewing: previewingVoice === v.voice_id }]"
                 @click="voiceMapping['阿南'] = v.voice_id"
               >
-                <div class="voice-name">{{ v.speaker_name }}</div>
+                <div class="voice-header">
+                  <div class="voice-name">{{ v.speaker_name }}</div>
+                  <button 
+                    class="preview-btn"
+                    @click.stop="previewingVoice === v.voice_id ? stopPreview() : previewVoice(v.voice_id)"
+                    :title="previewingVoice === v.voice_id ? '停止预览' : '试听'"
+                  >
+                    {{ previewingVoice === v.voice_id ? '⏹️' : '▶️' }}
+                  </button>
+                </div>
                 <div class="voice-desc">{{ v.description }}</div>
               </div>
             </div>
@@ -1182,11 +1247,46 @@ onUnmounted(() => {
   background: rgba(76, 175, 80, 0.15);
 }
 
+.voice-option.previewing {
+  border-color: #2196f3;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(33, 150, 243, 0); }
+}
+
+.voice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
 .voice-name {
   color: #e8f5e9;
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 4px;
+}
+
+.preview-btn {
+  background: rgba(33, 150, 243, 0.2);
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.3s;
+}
+
+.preview-btn:hover {
+  background: rgba(33, 150, 243, 0.3);
+  transform: scale(1.1);
 }
 
 .voice-desc {

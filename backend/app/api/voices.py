@@ -1,8 +1,12 @@
 """音色配置 API"""
+import os
+import asyncio
 from typing import List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import edge_tts
 
 from ..database import get_db
 from ..models import VoiceConfig
@@ -109,3 +113,84 @@ async def get_voice(voice_id: str, db: Session = Depends(get_db)):
         return {"error": "音色不存在"}
     
     return voice
+
+
+@router.get("/{voice_id}/preview")
+async def preview_voice(voice_id: str, db: Session = Depends(get_db)):
+    """生成音色预览音频"""
+    init_voices(db)
+    
+    voice = db.query(VoiceConfig).filter(VoiceConfig.id == voice_id).first()
+    if not voice:
+        raise HTTPException(404, "音色不存在")
+    
+    # 预览文本
+    preview_text = voice.preview_text or "大家好，这是音色预览。"
+    
+    # 预览音频缓存目录
+    preview_dir = "/tmp/voice_previews"
+    os.makedirs(preview_dir, exist_ok=True)
+    
+    # 使用 voice_id 作为文件名
+    preview_file = os.path.join(preview_dir, f"{voice.voice_id}.mp3")
+    
+    # 如果已存在且不超过1小时，直接返回
+    if os.path.exists(preview_file):
+        import time
+        file_age = time.time() - os.path.getmtime(preview_file)
+        if file_age < 3600:  # 1小时内
+            return FileResponse(
+                preview_file,
+                media_type="audio/mpeg",
+                filename=f"{voice.speaker_name}_preview.mp3"
+            )
+    
+    # 生成预览音频
+    try:
+        communicate = edge_tts.Communicate(preview_text, voice.voice_id)
+        await communicate.save(preview_file)
+        
+        return FileResponse(
+            preview_file,
+            media_type="audio/mpeg",
+            filename=f"{voice.speaker_name}_preview.mp3"
+        )
+    except Exception as e:
+        raise HTTPException(500, f"生成预览失败: {str(e)}")
+
+
+@router.get("/edge-id/{edge_voice_id}/preview")
+async def preview_voice_by_edge_id(edge_voice_id: str):
+    """通过 edge-tts 音色ID直接生成预览（用于前端实时预览）"""
+    # 预览文本
+    preview_text = "大家好，这是音色预览。"
+    
+    # 预览音频缓存目录
+    preview_dir = "/tmp/voice_previews"
+    os.makedirs(preview_dir, exist_ok=True)
+    
+    preview_file = os.path.join(preview_dir, f"{edge_voice_id}.mp3")
+    
+    # 如果已存在且不超过1小时，直接返回
+    if os.path.exists(preview_file):
+        import time
+        file_age = time.time() - os.path.getmtime(preview_file)
+        if file_age < 3600:  # 1小时内
+            return FileResponse(
+                preview_file,
+                media_type="audio/mpeg",
+                filename=f"preview.mp3"
+            )
+    
+    # 生成预览音频
+    try:
+        communicate = edge_tts.Communicate(preview_text, edge_voice_id)
+        await communicate.save(preview_file)
+        
+        return FileResponse(
+            preview_file,
+            media_type="audio/mpeg",
+            filename=f"preview.mp3"
+        )
+    except Exception as e:
+        raise HTTPException(500, f"生成预览失败: {str(e)}")

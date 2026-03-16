@@ -53,6 +53,7 @@ class BookResponse(BaseModel):
 class BookStatusResponse(BaseModel):
     id: str
     title: str
+    author: Optional[str] = None
     status: str
     total_chapters: int
     completed_chapters: int
@@ -60,6 +61,9 @@ class BookStatusResponse(BaseModel):
     script_progress: int
     audio_progress: int
     error_message: Optional[str] = None
+    prompt_id: Optional[str] = None
+    queue: Optional[dict] = None
+    tasks: Optional[List[dict]] = None
     chapters: List["ChapterResponse"] = []
 
 

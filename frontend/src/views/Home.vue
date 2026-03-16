@@ -33,27 +33,14 @@ const checkBackend = async () => {
   }
 }
 
-// 接受证书
+// 接受证书 - 直接切换到服务器版本
 const acceptCertificate = async () => {
-  // 尝试直接访问 HTTPS API
-  try {
-    // 先尝试获取音色列表（这个请求会触发证书错误）
-    const res = await fetch('https://139.196.211.206/api/voices')
-    if (res.ok) {
-      backendOnline.value = true
-      showCertHint.value = false
-      alert('✅ 证书已接受，服务已连接！')
-      return
-    }
-  } catch (e) {
-    // 如果失败，打开新窗口让用户手动接受
-    const httpsUrl = 'https://139.196.211.206/health'
-    const win = window.open(httpsUrl, '_blank')
-    if (win) {
-      setTimeout(() => {
-        alert('请在新打开的页面中：\n1. 点击"高级"或"详细信息"\n2. 点击"继续访问"或"接受风险"\n3. 然后回到本页面点击"刷新状态"')
-      }, 500)
-    }
+  // 如果在 GitHub Pages，直接跳转到服务器
+  if (isGitHubPages) {
+    window.location.href = 'http://139.196.211.206/'
+  } else {
+    // 非GitHub Pages，尝试刷新
+    await refreshStatus()
   }
 }
 
@@ -67,9 +54,6 @@ const refreshStatus = async () => {
   showCertHint.value = false
   backendOnline.value = false
   await checkBackend()
-  if (backendOnline.value) {
-    alert('✅ 服务连接成功！')
-  }
 }
 
 // 检测是否在 GitHub Pages 上
@@ -313,36 +297,31 @@ onMounted(() => {
     <div v-if="showCertHint" class="modal-overlay" @click.self="showCertHint = false">
       <div class="modal-content cert-hint-modal">
         <div class="modal-header">
-          <h2>🔒 连接问题</h2>
+          <h2>🔒 无法连接服务器</h2>
           <button class="close-btn" @click="showCertHint = false">×</button>
         </div>
         <div class="cert-hint-body">
           <p class="hint-title">后端服务暂时无法访问</p>
           <p class="hint-desc" v-if="isGitHubPages">
-            GitHub Pages 使用 HTTPS，但服务器证书是自签名的。<br>
-            请选择以下方式访问：
+            GitHub Pages 使用 HTTPS，无法直接访问 HTTP 接口。<br>
+            请点击下方按钮切换到服务器版本：
           </p>
           <p class="hint-desc" v-else>
-            可能是以下原因之一：
+            服务器可能暂时离线，请稍后重试。
           </p>
           
           <div class="hint-actions">
-            <button class="btn-primary" @click="switchToServer" v-if="isGitHubPages">
+            <button class="btn-primary big-btn" @click="switchToServer" v-if="isGitHubPages">
               🚀 切换到服务器版本
             </button>
-            <button class="btn-secondary" @click="acceptCertificate">
-              🔓 接受安全证书
-            </button>
-            <button class="btn-text" @click="refreshStatus">
+            <button class="btn-secondary big-btn" @click="refreshStatus" v-else>
               🔄 刷新状态
             </button>
           </div>
           
           <p class="hint-note" v-if="isGitHubPages">
-            💡 推荐点击"切换到服务器版本"，将跳转到 http://139.196.211.206
-          </p>
-          <p class="hint-note" v-else>
-            💡 点击"接受安全证书"后，在新页面中点击"高级" → "继续访问"即可
+            💡 点击后将跳转到 http://139.196.211.206<br>
+            推荐使用服务器版本获得最佳体验
           </p>
         </div>
       </div>
@@ -610,12 +589,62 @@ onMounted(() => {
 }
 
 /* 离线提示弹窗 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: linear-gradient(135deg, #1a3a2a 0%, #0f2419 100%);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 400px;
+  margin: 20px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.modal-header h2 {
+  color: #4caf50;
+  margin: 0;
+  font-size: 20px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #81c784;
+  font-size: 28px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #4caf50;
+}
+
 .cert-hint-modal {
-  max-width: 480px;
+  max-width: 420px;
 }
 
 .cert-hint-body {
-  padding: 20px 0;
+  padding: 10px 0;
 }
 
 .hint-title {
@@ -628,76 +657,46 @@ onMounted(() => {
 .hint-desc {
   color: #a5d6a7;
   font-size: 14px;
-  margin-bottom: 12px;
-}
-
-.hint-list {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 20px 0;
-}
-
-.hint-list li {
-  color: #e8f5e9;
-  font-size: 13px;
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(76, 175, 80, 0.1);
-}
-
-.hint-list li:last-child {
-  border-bottom: none;
+  margin-bottom: 20px;
+  line-height: 1.6;
 }
 
 .hint-actions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 16px;
 }
 
-.hint-actions .btn-primary {
+.hint-actions .big-btn {
   width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #4caf50, #2e7d32);
-  border: none;
-  border-radius: 8px;
-  color: white;
-  font-size: 15px;
+  padding: 16px;
+  border-radius: 10px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s;
 }
 
+.hint-actions .btn-primary {
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  border: none;
+  color: white;
+}
+
 .hint-actions .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+  box-shadow: 0 6px 16px rgba(76, 175, 80, 0.4);
 }
 
 .hint-actions .btn-secondary {
-  width: 100%;
-  padding: 12px;
   background: rgba(76, 175, 80, 0.2);
   border: 1px solid rgba(76, 175, 80, 0.3);
-  border-radius: 8px;
   color: #81c784;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
 }
 
 .hint-actions .btn-secondary:hover {
   background: rgba(76, 175, 80, 0.3);
-}
-
-.hint-actions .btn-text {
-  width: 100%;
-  padding: 10px;
-  background: none;
-  border: none;
-  color: #81c784;
-  font-size: 13px;
-  cursor: pointer;
-  text-decoration: underline;
 }
 
 .hint-note {
@@ -708,6 +707,7 @@ onMounted(() => {
   padding: 12px;
   border-radius: 8px;
   margin: 0;
+  line-height: 1.6;
 }
 
 .status-badge.offline {

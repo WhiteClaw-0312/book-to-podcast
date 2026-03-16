@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { apiFetch, getUser, getToken } from '../api'
 
 const router = useRouter()
+const route = useRoute()
 const user = ref<any>(null)
 const prompts = ref<any[]>([])
+const books = ref<any[]>([])
 const loading = ref(true)
 const editing = ref(false)
 const currentPrompt = ref<any>(null)
@@ -30,6 +32,10 @@ const filteredPrompts = computed(() => {
   }
   return prompts.value
 })
+
+// 选择书籍模式
+const showBookSelector = ref(false)
+const selectedPromptForUse = ref<any>(null)
 
 // 默认 Prompt
 const defaultPrompt = `你是一位专业的播客编剧，擅长将图书内容转换为引人入胜的双人对话式播客。
@@ -97,7 +103,73 @@ const usePrompt = async (prompt: any) => {
     alert('请先登录')
     return
   }
-  // 跳转到首页
+  
+  // 获取用户的书籍列表
+  try {
+    const token = getToken()
+    const res = await apiFetch('/api/books/my-books', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      const bookList = await res.json()
+      if (bookList.length === 0) {
+        alert('您还没有上传书籍，请先上传一本书籍')
+        router.push('/')
+        return
+      }
+      
+      // 显示书籍选择器
+      books.value = bookList.filter((b: any) => 
+        b.status === 'ready' || b.status === 'script_ready' || b.status === 'partial'
+      )
+      
+      if (books.value.length === 0) {
+        alert('没有可用的书籍（需要已上传并完成OCR的书籍）')
+        router.push('/')
+        return
+      }
+      
+      selectedPromptForUse.value = prompt
+      showBookSelector.value = true
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+// 选择书籍后应用Prompt
+const applyToBook = async (book: any) => {
+  if (!selectedPromptForUse.value || !book) return
+  
+  try {
+    const token = getToken()
+    // 更新书籍的 prompt_id
+    const res = await apiFetch(`/api/books/${book.id}`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ prompt_id: selectedPromptForUse.value.id })
+    })
+    
+    if (res.ok) {
+      showBookSelector.value = false
+      alert(`已将 Prompt "${selectedPromptForUse.value.name}" 应用到书籍 "${book.title}"`)
+      router.push(`/book/${book.id}`)
+    } else {
+      const err = await res.json()
+      throw new Error(err.detail || '应用失败')
+    }
+  } catch (e: any) {
+    alert('应用失败: ' + e.message)
+  }
+}
+
+// 直接使用Prompt生成新播客
+const createNewWithPrompt = () => {
+  // 存储选中的Prompt
+  if (selectedPromptForUse.value) {
+    localStorage.setItem('selected_prompt', JSON.stringify(selectedPromptForUse.value))
+  }
+  showBookSelector.value = false
   router.push('/')
 }
 
@@ -278,6 +350,43 @@ onMounted(() => {
         </div>
       </div>
     </template>
+
+    <!-- 书籍选择弹窗 -->
+    <div v-if="showBookSelector" class="modal-overlay" @click.self="showBookSelector = false">
+      <div class="modal-content book-selector-modal">
+        <div class="modal-header">
+          <h2>📚 选择书籍</h2>
+          <button class="close-btn" @click="showBookSelector = false">×</button>
+        </div>
+        
+        <div class="book-selector-body">
+          <p class="selector-hint">
+            将 Prompt "<strong>{{ selectedPromptForUse?.name }}</strong>" 应用到哪本书？
+          </p>
+          
+          <div class="book-list">
+            <div 
+              v-for="book in books" 
+              :key="book.id" 
+              class="book-option"
+              @click="applyToBook(book)"
+            >
+              <div class="book-info">
+                <div class="book-title">{{ book.title }}</div>
+                <div class="book-meta">{{ book.total_chapters }} 章 · {{ book.status === 'ready' ? '未生成文稿' : '文稿已就绪' }}</div>
+              </div>
+              <div class="book-action">应用 →</div>
+            </div>
+          </div>
+          
+          <div class="selector-footer">
+            <button class="btn btn-primary" @click="createNewWithPrompt">
+              + 上传新书籍
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -478,5 +587,118 @@ onMounted(() => {
   background: rgba(244, 67, 54, 0.2);
   border: 1px solid rgba(244, 67, 54, 0.3);
   color: #ef5350;
+}
+
+/* 书籍选择弹窗 */
+.book-selector-modal {
+  max-width: 500px;
+}
+
+.book-selector-body {
+  padding: 20px;
+}
+
+.selector-hint {
+  color: #a5d6a7;
+  margin-bottom: 20px;
+}
+
+.selector-hint strong {
+  color: #4caf50;
+}
+
+.book-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.book-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: rgba(0, 30, 20, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.book-option:hover {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.book-title {
+  color: #e8f5e9;
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.book-meta {
+  color: #81c784;
+  font-size: 12px;
+}
+
+.book-action {
+  color: #4caf50;
+  font-size: 13px;
+}
+
+.selector-footer {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+  text-align: center;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: linear-gradient(135deg, #1a3a2a 0%, #0f2419 100%);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 16px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  margin: 20px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.modal-header h2 {
+  color: #4caf50;
+  margin: 0;
+  font-size: 20px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: #81c784;
+  font-size: 28px;
+  cursor: pointer;
+  line-height: 1;
 }
 </style>
