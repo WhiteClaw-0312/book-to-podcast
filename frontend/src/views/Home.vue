@@ -75,23 +75,42 @@ const demoProgress = ref(0)
 const demoCurrentTime = ref(0)
 const demoDuration = ref(426) // 7:06
 
+// 示例字幕（简化版）
+const demoScript = [
+  { speaker: '小北', content: '哈喽大家好，欢迎收听今天的读书播客，我是你们充满好奇的小北！' },
+  { speaker: '阿南', content: '大家好，我是阿南。今天我们要解读的这本书，确实是一本非常独特的作品。' },
+  { speaker: '小北', content: '我刚刚拿到这个第一章的正文内容，说实话，我第一眼看上去有点懵呢！' },
+  { speaker: '阿南', content: '其实这并不意外。这本书的内容呈现出一种非常抽象的形式，可以说是一种尝试。' },
+  { speaker: '小北', content: '那这些符号，难道是在暗示什么特殊的密码或者隐藏信息吗？' },
+  { speaker: '阿南', content: '可以说有这种可能。在这种实验性的文本中，符号往往不仅仅是字符。' },
+  { speaker: '小北', content: '我觉得太有意思了！就像是在探索一个未知的领域，每一个字符都是一个谜题。' },
+  { speaker: '阿南', content: '没错。面对这样的文本，我们需要放下对传统叙事的期待。' },
+]
+const demoCurrentLine = ref(0)
+
 const toggleDemoAudio = () => {
   if (!demoAudio.value) {
-    // 使用实际示例音频
     demoAudio.value = new Audio('http://139.196.211.206/audio/demo_chapter_1.mp3')
     demoAudio.value.onloadedmetadata = () => {
-      demoDuration.value = demoAudio.value?.duration || 458
+      demoDuration.value = demoAudio.value?.duration || 426
     }
     demoAudio.value.ontimeupdate = () => {
       if (demoAudio.value) {
         demoCurrentTime.value = demoAudio.value.currentTime
         demoProgress.value = (demoAudio.value.currentTime / demoDuration.value) * 100
+        // 根据时间更新当前字幕行
+        const lineDuration = demoDuration.value / demoScript.length
+        demoCurrentLine.value = Math.min(
+          Math.floor(demoAudio.value.currentTime / lineDuration),
+          demoScript.length - 1
+        )
       }
     }
     demoAudio.value.onended = () => {
       demoPlaying.value = false
       demoProgress.value = 0
       demoCurrentTime.value = 0
+      demoCurrentLine.value = 0
     }
   }
   
@@ -577,6 +596,71 @@ const deleteBook = async (bookId: string) => {
   }
 }
 
+// 查看文稿
+const viewScript = (bookId: string, chapterNum: number) => {
+  // 跳转到文稿编辑页面
+  window.location.href = `/book/${bookId}/script?chapter=${chapterNum}`
+}
+
+// 播放章节音频
+const playingChapter = ref<any>(null)
+const showAudioPlayer = ref(false)
+const audioPlayerRef = ref<HTMLAudioElement | null>(null)
+const playerCurrentTime = ref(0)
+const playerDuration = ref(0)
+const playerScript = ref<any[]>([])
+const playerCurrentLine = ref(0)
+
+const playChapterAudio = async (bookId: string, chapter: any) => {
+  playingChapter.value = chapter
+  showAudioPlayer.value = true
+  
+  // 获取文稿
+  try {
+    const res = await apiFetch(`/api/books/${bookId}/chapters/${chapter.number}/script`)
+    if (res.ok) {
+      const data = await res.json()
+      playerScript.value = data.dialogues || []
+    }
+  } catch (e) {
+    playerScript.value = []
+  }
+}
+
+const closeAudioPlayer = () => {
+  if (audioPlayerRef.value) {
+    audioPlayerRef.value.pause()
+  }
+  showAudioPlayer.value = false
+  playingChapter.value = null
+  playerScript.value = []
+  playerCurrentLine.value = 0
+}
+
+const onPlayerTimeUpdate = () => {
+  if (!audioPlayerRef.value || !playerScript.value.length) return
+  playerCurrentTime.value = audioPlayerRef.value.currentTime
+  const lineDuration = playerDuration.value / playerScript.value.length
+  playerCurrentLine.value = Math.min(
+    Math.floor(audioPlayerRef.value.currentTime / lineDuration),
+    playerScript.value.length - 1
+  )
+}
+
+const seekPlayer = (e: MouseEvent) => {
+  if (!audioPlayerRef.value) return
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const percent = (e.clientX - rect.left) / rect.width
+  audioPlayerRef.value.currentTime = percent * playerDuration.value
+}
+
+// 刷新书籍状态
+const refreshBookStatus = async (bookId: string) => {
+  await fetchBookDetail()
+  await fetchQueue()
+}
+
 // 格式化时间
 const formatTime = (seconds: number) => {
   const m = Math.floor(seconds / 60)
@@ -849,18 +933,29 @@ onUnmounted(() => {
             
             <!-- 已完成 -->
             <div v-else-if="book.status === 'completed'" class="completed-section">
-              <p class="completed-hint">🎉 所有章节已完成，点击章节播放音频</p>
+              <p class="completed-hint">🎉 所有章节已完成</p>
               <div class="chapter-list-detail">
-                <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row clickable">
+                <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row">
                   <div class="chapter-info">
                     <span class="chapter-num">第{{ ch.number }}章</span>
                     <span class="chapter-title">{{ ch.title }}</span>
                   </div>
-                  <div class="chapter-status">
-                    <span class="has-audio">🎧 {{ formatTime(ch.duration) }}</span>
+                  <div class="chapter-actions-row">
+                    <button class="btn-small" @click="viewScript(book.id, ch.number)">📝 文稿</button>
+                    <button class="btn-small primary" @click="playChapterAudio(book.id, ch)">🎧 播放</button>
                   </div>
                 </div>
               </div>
+            </div>
+            
+            <!-- 其他状态（pending等） -->
+            <div v-else class="other-status-section">
+              <p class="status-hint">
+                <template v-if="book.status === 'pending'">⏳ 正在识别文档...</template>
+                <template v-else-if="book.status === 'processing'">⏳ 处理中...</template>
+                <template v-else>状态: {{ book.status }}</template>
+              </p>
+              <button class="btn btn-secondary" @click="refreshBookStatus(book.id)">刷新状态</button>
             </div>
           </div>
         </div>
@@ -887,9 +982,22 @@ onUnmounted(() => {
       <p class="demo-subtitle">这是 AI 生成的播客示例，感受一下效果</p>
       <div class="demo-player">
         <div class="demo-info">
-          <span class="demo-book">📖 《无语问上帝》第一章</span>
+          <span class="demo-book">📖 试听文件</span>
           <span class="demo-duration">7分06秒</span>
         </div>
+        
+        <!-- 字幕显示 -->
+        <div class="demo-subtitle-box">
+          <div 
+            v-for="(line, idx) in demoScript" 
+            :key="idx"
+            :class="['demo-line', { active: idx === demoCurrentLine }]"
+          >
+            <span :class="['speaker-tag', line.speaker === '小北' ? 'female' : 'male']">{{ line.speaker }}</span>
+            <span class="line-content">{{ line.content }}</span>
+          </div>
+        </div>
+        
         <div class="demo-controls">
           <button class="demo-play-btn" @click="toggleDemoAudio">
             {{ demoPlaying ? '⏸️' : '▶️' }}
@@ -899,7 +1007,6 @@ onUnmounted(() => {
           </div>
           <span class="demo-time">{{ formatTime(demoCurrentTime) }} / {{ formatTime(demoDuration) }}</span>
         </div>
-        <p class="demo-desc">双人对话形式，像听播客节目一样听书</p>
       </div>
     </div>
 
@@ -1060,6 +1167,49 @@ onUnmounted(() => {
           <button class="guide-next" @click="nextGuideStep">
             {{ guideStep < 2 ? '下一步' : '开始使用' }}
           </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 音频播放器弹窗 -->
+    <div v-if="showAudioPlayer" class="modal-overlay" @click.self="closeAudioPlayer">
+      <div class="modal-content audio-player-modal">
+        <div class="modal-header">
+          <h2>🎧 {{ playingChapter?.title || '播放音频' }}</h2>
+          <button class="close-btn" @click="closeAudioPlayer">×</button>
+        </div>
+        
+        <div class="player-body">
+          <!-- 字幕区域 -->
+          <div class="player-script" v-if="playerScript.length > 0">
+            <div 
+              v-for="(line, idx) in playerScript" 
+              :key="idx"
+              :class="['script-line', { active: idx === playerCurrentLine }]"
+            >
+              <span :class="['speaker-tag', line.speaker === '小北' ? 'female' : 'male']">{{ line.speaker }}</span>
+              <span class="script-content">{{ line.content }}</span>
+            </div>
+          </div>
+          
+          <!-- 控制区域 -->
+          <div class="player-controls-bottom">
+            <audio 
+              ref="audioPlayerRef"
+              :src="`/api/books/${selectedBookId}/chapters/${playingChapter?.number}/audio`"
+              @loadedmetadata="playerDuration = audioPlayerRef?.duration || 0"
+              @timeupdate="onPlayerTimeUpdate"
+              @ended="closeAudioPlayer"
+              autoplay
+            />
+            <div class="player-progress" @click="seekPlayer">
+              <div class="player-progress-fill" :style="{ width: (playerCurrentTime / playerDuration * 100) + '%' }"></div>
+            </div>
+            <div class="player-time-row">
+              <span>{{ formatTime(playerCurrentTime) }}</span>
+              <span>{{ formatTime(playerDuration) }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2125,6 +2275,137 @@ onUnmounted(() => {
   cursor: pointer;
   font-size: 14px;
   font-weight: 600;
+}
+
+/* Demo subtitle box */
+.demo-subtitle-box {
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 12px 0;
+  padding: 12px;
+  background: rgba(0, 20, 15, 0.6);
+  border-radius: 8px;
+}
+
+.demo-line {
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: all 0.3s;
+}
+
+.demo-line.active {
+  background: rgba(76, 175, 80, 0.2);
+}
+
+.speaker-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.speaker-tag.female {
+  background: rgba(233, 30, 99, 0.3);
+  color: #f48fb1;
+}
+
+.speaker-tag.male {
+  background: rgba(33, 150, 243, 0.3);
+  color: #81d4fa;
+}
+
+.line-content {
+  color: #e8f5e9;
+}
+
+/* Chapter actions row */
+.chapter-actions-row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-small.primary {
+  background: rgba(76, 175, 80, 0.3);
+  border-color: #4caf50;
+  color: #a5d6a7;
+}
+
+/* Audio player modal */
+.audio-player-modal {
+  max-width: 500px;
+  max-height: 80vh;
+}
+
+.player-body {
+  padding: 0;
+}
+
+.player-script {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 16px;
+  background: rgba(0, 20, 15, 0.4);
+}
+
+.script-line {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: all 0.3s;
+}
+
+.script-line.active {
+  background: rgba(76, 175, 80, 0.2);
+  transform: translateX(4px);
+}
+
+.script-content {
+  color: #e8f5e9;
+}
+
+.player-controls-bottom {
+  padding: 16px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.player-progress {
+  height: 6px;
+  background: rgba(76, 175, 80, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.player-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4caf50, #81c784);
+  border-radius: 3px;
+}
+
+.player-time-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #81c784;
+}
+
+/* Other status section */
+.other-status-section {
+  padding: 20px;
+  text-align: center;
+}
+
+.status-hint {
+  color: #ffb74d;
+  font-size: 14px;
+  margin-bottom: 12px;
 }
 
 @media (max-width: 600px) {
