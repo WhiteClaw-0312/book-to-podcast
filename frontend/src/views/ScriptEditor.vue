@@ -25,8 +25,11 @@ const voiceMapping = ref<Record<string, string>>({
   '阿南': 'zh-CN-YunxiNeural'
 })
 
-// 角色列表（从文稿中提取）
-const speakers = computed(() => {
+// 角色列表（固定为小北和阿南）
+const SPEAKERS = ['小北', '阿南']
+
+// 从文稿中提取的角色（用于显示当前使用的角色）
+const usedSpeakers = computed(() => {
   return [...new Set(dialogues.value.map(d => d.speaker))]
 })
 
@@ -117,7 +120,7 @@ const fetchData = async () => {
 // 添加对话
 const addDialogue = (afterIndex: number) => {
   const newDialogue = {
-    speaker: speakers.value[0] || '小北',
+    speaker: SPEAKERS[0],
     content: ''
   }
   dialogues.value.splice(afterIndex + 1, 0, newDialogue)
@@ -273,10 +276,10 @@ onMounted(() => {
       <!-- 角色提示 -->
       <div class="speakers-info">
         <span class="label">当前角色：</span>
-        <span v-for="speaker in speakers" :key="speaker" class="speaker-tag">
+        <span v-for="speaker in usedSpeakers" :key="speaker" class="speaker-tag">
           {{ speaker }}
         </span>
-        <span v-if="speakers.length === 0" class="no-speakers">暂无角色</span>
+        <span v-if="usedSpeakers.length === 0" class="no-speakers">暂无角色</span>
       </div>
 
       <!-- 对话列表 -->
@@ -293,9 +296,7 @@ onMounted(() => {
               @change="changeSpeaker(i, ($event.target as HTMLSelectElement).value)"
               class="speaker-select"
             >
-              <option v-for="s in speakers" :key="s" :value="s">{{ s }}</option>
-              <option value="小北">小北</option>
-              <option value="阿南">阿南</option>
+              <option v-for="s in SPEAKERS" :key="s" :value="s">{{ s }}</option>
             </select>
             <div class="dialogue-actions">
               <button class="btn-icon" @click="startEdit(i)" title="编辑">✏️</button>
@@ -336,7 +337,7 @@ onMounted(() => {
 
       <!-- 底部操作 -->
       <div class="bottom-actions" v-if="dialogues.length > 0">
-        <button class="btn btn-secondary" @click="dialogues.push({ speaker: speakers[0] || '小北', content: '' })">
+        <button class="btn btn-secondary" @click="dialogues.push({ speaker: SPEAKERS[0], content: '' })">
           ➕ 添加对话
         </button>
       </div>
@@ -370,7 +371,7 @@ onMounted(() => {
           <p class="voice-hint">为播客中的角色选择合适的音色</p>
           
           <!-- 小北（女声） -->
-          <div class="voice-group" v-if="speakers.includes('小北')">
+          <div class="voice-group">
             <h3>👩 小北（女主持）</h3>
             <div class="voice-options">
               <div 
@@ -394,7 +395,7 @@ onMounted(() => {
           </div>
           
           <!-- 阿南（男声） -->
-          <div class="voice-group" v-if="speakers.includes('阿南')">
+          <div class="voice-group">
             <h3>👨 阿南（男主持）</h3>
             <div class="voice-options">
               <div 

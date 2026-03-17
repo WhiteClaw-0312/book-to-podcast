@@ -410,7 +410,7 @@ async def generate_audio_only(
         ).order_by(TaskQueue.created_at.desc()).first()
         
         if task:
-            run_task_in_background(task.id, "audio", book_id, chapter_num, voice_mapping=request.voice_mapping if hasattr(request, 'voice_mapping') else None)
+            run_task_in_background(task.id, "audio", book_id, chapter_num, voice_mapping=request.voice_mapping)
     
     return GenerateResponse(
         message=f"已加入队列，开始生成 {cost} 章音频",
