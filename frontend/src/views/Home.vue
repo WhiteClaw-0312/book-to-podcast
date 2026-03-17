@@ -73,53 +73,81 @@ const demoAudio = ref<HTMLAudioElement | null>(null)
 const demoPlaying = ref(false)
 const demoProgress = ref(0)
 const demoCurrentTime = ref(0)
-const demoDuration = ref(426)
+const demoDuration = ref(425.78)
 
-// 示例字幕（完整版，与音频对应）
+// 示例字幕（带时间戳，与音频精确对应）
 const demoScript = [
-  { speaker: '小北', content: '欢迎收听今天的科技播客！阿南，今天我们要聊的这篇论文标题好长啊，什么对称性禁止之类的，听起来很高深呢。' },
-  { speaker: '阿南', content: '没错，标题确实有点复杂。其实简单来说，这篇论文讨论的是二维范德华铁磁体中超低吉尔伯特阻尼的现象。' },
-  { speaker: '小北', content: '哇，二维范德华铁磁体？这听起来像是那种可以像纸一样薄的磁性材料吗？真的存在这种东西？' },
-  { speaker: '阿南', content: '是的，比如CrI3、Fe3GeTe2这些材料。它们的发现不仅拓宽了磁性材料的视野，还为低维自旋电子学器件带来了希望。' },
-  { speaker: '小北', content: '诶~ 自旋电子学器件？这跟我们平时用的电子设备有什么关系吗？为什么要特别研究它们的磁性呢？' },
-  { speaker: '阿南', content: '关系很大。因为二维范德华铁磁体的磁性可以通过栅极电压或应变等独特方式来控制，这比传统材料灵活多了。' },
-  { speaker: '小北', content: '真的吗？那岂不是可以实现更小巧、更节能的设备？不过论文里提到的吉尔伯特阻尼又是什么呢？' },
-  { speaker: '阿南', content: '可以说它是磁化动力学中的一个关键参数。它决定了电流诱导磁化翻转的临界电流密度，以及翻转的速度。' },
-  { speaker: '小北', content: '哇，听起来像是某种阻力？那这个阻尼是越大越好，还是越小越好呢？我有点搞不清楚了。' },
-  { speaker: '阿南', content: '对于低功耗的存储和逻辑器件来说，低吉尔伯特阻尼是至关重要的。阻尼越低，能量消耗就越少，效率越高。' },
-  { speaker: '小北', content: '诶~ 原来是这样！那传统的铁磁材料，比如铁、钴、镍，它们的阻尼表现怎么样呢？有没有什么局限？' },
-  { speaker: '阿南', content: '传统材料的阻尼随温度变化是非单调的。低温下像电导率，高温下像电阻率，这限制了阻尼不能低于某个下限。' },
-  { speaker: '小北', content: '真的吗？也就是说传统材料不管怎么优化，阻尼都有一个最低限度，没法无限降低咯？' },
-  { speaker: '阿南', content: '没错。但这篇论文研究的二维铁磁金属，比如Fe3GaTe2，却表现出了单调的温度依赖性，这是一个非常不寻常的现象。' },
-  { speaker: '小北', content: '哇，单调依赖性？这意味着什么？是不是说随着温度变化，它的阻尼表现跟传统材料完全不一样？' },
-  { speaker: '阿南', content: '是的。研究发现，在低温下，由于镜像对称性禁止了带内跃迁，导致阻尼变得超低，甚至理论上没有下限。' },
-  { speaker: '小北', content: '诶~ 镜像对称性禁止带内跃迁？这听起来好抽象，对称性怎么还能禁止电子的跃迁呢？真的吗？' },
-  { speaker: '阿南', content: '其实可以理解为一种量子力学的选择定则。在这种对称性保护下，电子在某些能带之间的跳转被规则禁止了。' },
-  { speaker: '小北', content: '哇，就像是一条交通规则，告诉电子这条路不能走？那这样的话，能量损耗自然就变小了？' },
-  { speaker: '阿南', content: '没错，正是这个原因。因为带内跃迁被禁止，导电类的阻尼消失了，所以阻尼可以随着电子散射率的降低而任意减小。' },
+  { speaker: '小北', content: '欢迎收听今天的科技播客！阿南，今天我们要聊的这篇论文标题好长啊，什么对称性禁止之类的，听起来很高深呢。', start: 0, end: 10.78 },
+  { speaker: '阿南', content: '没错，标题确实有点复杂。其实简单来说，这篇论文讨论的是二维范德华铁磁体中超低吉尔伯特阻尼的现象。', start: 10.78, end: 20.93 },
+  { speaker: '小北', content: '哇，二维范德华铁磁体？这听起来像是那种可以像纸一样薄的磁性材料吗？真的存在这种东西？', start: 20.93, end: 29.81 },
+  { speaker: '阿南', content: '是的，比如CrI3、Fe3GeTe2这些材料。它们的发现不仅拓宽了磁性材料的视野，还为低维自旋电子学器件带来了希望。', start: 29.81, end: 42.07 },
+  { speaker: '小北', content: '诶~ 自旋电子学器件？这跟我们平时用的电子设备有什么关系吗？为什么要特别研究它们的磁性呢？', start: 42.07, end: 51.58 },
+  { speaker: '阿南', content: '关系很大。因为二维范德华铁磁体的磁性可以通过栅极电压或应变等独特方式来控制，这比传统材料灵活多了。', start: 51.58, end: 61.94 },
+  { speaker: '小北', content: '真的吗？那岂不是可以实现更小巧、更节能的设备？不过论文里提到的吉尔伯特阻尼又是什么呢？', start: 61.94, end: 71.03 },
+  { speaker: '阿南', content: '可以说它是磁化动力学中的一个关键参数。它决定了电流诱导磁化翻转的临界电流密度，以及翻转的速度。', start: 71.03, end: 80.97 },
+  { speaker: '小北', content: '哇，听起来像是某种阻力？那这个阻尼是越大越好，还是越小越好呢？我有点搞不清楚了。', start: 80.97, end: 89.43 },
+  { speaker: '阿南', content: '对于低功耗的存储和逻辑器件来说，低吉尔伯特阻尼是至关重要的。阻尼越低，能量消耗就越少，效率越高。', start: 89.43, end: 99.58 },
+  { speaker: '小北', content: '诶~ 原来是这样！那传统的铁磁材料，比如铁、钴、镍，它们的阻尼表现怎么样呢？有没有什么局限？', start: 99.58, end: 109.3 },
+  { speaker: '阿南', content: '传统材料的阻尼随温度变化是非单调的。低温下像电导率，高温下像电阻率，这限制了阻尼不能低于某个下限。', start: 109.3, end: 119.66 },
+  { speaker: '小北', content: '真的吗？也就是说传统材料不管怎么优化，阻尼都有一个最低限度，没法无限降低咯？', start: 119.66, end: 127.69 },
+  { speaker: '阿南', content: '没错。但这篇论文研究的二维铁磁金属，比如Fe3GaTe2，却表现出了单调的温度依赖性，这是一个非常不寻常的现象。', start: 127.69, end: 139.53 },
+  { speaker: '小北', content: '哇，单调依赖性？这意味着什么？是不是说随着温度变化，它的阻尼表现跟传统材料完全不一样？', start: 139.53, end: 148.62 },
+  { speaker: '阿南', content: '是的。研究发现，在低温下，由于镜像对称性禁止了带内跃迁，导致阻尼变得超低，甚至理论上没有下限。', start: 148.62, end: 158.56 },
+  { speaker: '小北', content: '诶~ 镜像对称性禁止带内跃迁？这听起来好抽象，对称性怎么还能禁止电子的跃迁呢？真的吗？', start: 158.56, end: 167.65 },
+  { speaker: '阿南', content: '其实可以理解为一种量子力学的选择定则。在这种对称性保护下，电子在某些能带之间的跳转被规则禁止了。', start: 167.65, end: 177.8 },
+  { speaker: '小北', content: '哇，就像是一条交通规则，告诉电子这条路不能走？那这样的话，能量损耗自然就变小了？', start: 177.8, end: 186.25 },
+  { speaker: '阿南', content: '没错，正是这个原因。因为带内跃迁被禁止，导电类的阻尼消失了，所以阻尼可以随着电子散射率的降低而任意减小。', start: 186.25, end: 197.25 },
+  { speaker: '小北', content: '真的吗？那如果我想增加阻尼怎么办？毕竟有时候可能需要不同的性能，这个能调控吗？', start: 197.25, end: 205.49 },
+  { speaker: '阿南', content: '当然可以。通过磁化旋转、层堆叠或结构相变来打破镜像对称性，就能显著增加阻尼，因为这时带内跃迁被允许了。', start: 205.49, end: 216.27 },
+  { speaker: '小北', content: '诶~ 这调控手段也太丰富了吧！那论文里还提到了拓扑节点线，这个又是对阻尼有什么影响呢？', start: 216.27, end: 225.37 },
+  { speaker: '阿南', content: '拓扑节点线也是受镜像对称性保护的。它们主要贡献于带间跃迁介导的阻尼，这部分可以通过调节费米能级来调控。', start: 225.37, end: 236.15 },
+  { speaker: '小北', content: '哇，调节费米能级就能改变阻尼？这感觉像是在调收音机一样，能找到最佳的信号点？', start: 236.15, end: 245.66 },
+  { speaker: '阿南', content: '比喻很恰当。这些发现阐明了二维范德华铁磁体中吉尔伯特阻尼的独特特性，为设计高能效率器件提供了见解。', start: 245.66, end: 256.02 },
+  { speaker: '小北', content: '真的吗？那这些结论是只适用于Fe3GaTe2这一种材料，还是其他类似的材料也适用呢？', start: 256.02, end: 264.9 },
+  { speaker: '阿南', content: '这些独特特征通常适用于其他具有镜像对称性的二维范德华材料，比如Fe3GeTe2和2H-FeTe2，通用性很强。', start: 264.9, end: 276.53 },
+  { speaker: '小北', content: '诶~ 那研究者是用什么方法得出这些结论的呢？是做了实验还是纯理论计算？', start: 276.53, end: 286.04 },
+  { speaker: '阿南', content: '这篇论文主要是基于第一性原理计算。他们利用了力矩关联模型来计算二维范德华铁磁体的吉尔伯特阻尼。', start: 286.04, end: 295.98 },
+  { speaker: '小北', content: '哇，第一性原理计算，听起来就是那种从量子力学基本方程出发的硬核计算吧？难度很大吗？', start: 295.98, end: 304.64 },
+  { speaker: '阿南', content: '确实不小。这个模型捕捉了由于自旋轨道耦合导致的磁化动态耗散，这是内在吉尔伯特阻尼的主要贡献来源。', start: 304.64, end: 314.79 },
+  { speaker: '小北', content: '真的吗？自旋轨道耦合我之前听说过，好像是电子自旋和轨道运动之间的相互作用？', start: 314.79, end: 322.61 },
+  { speaker: '阿南', content: '没错。公式里包含了很多项，比如朗德因子、玻尔磁子，还有费米-狄拉克分布的能量导数。', start: 322.61, end: 334.88 },
+  { speaker: '小北', content: '诶~ 虽然公式听不懂，但大概明白了，就是重点研究费米面附近的电子状态对阻尼的影响对吧？', start: 334.88, end: 343.97 },
+  { speaker: '阿南', content: '可以说就是这样。矩阵元素表征了源自自旋轨道耦合的电子自旋力矩，这是计算阻尼的核心物理量。', start: 343.97, end: 353.27 },
+  { speaker: '小北', content: '哇，感觉这篇论文不仅理论扎实，而且应用前景也很广阔啊。未来我们的手机会不会用上这种材料？', start: 353.27, end: 362.57 },
+  { speaker: '阿南', content: '很有希望。特别是Fe3GaTe2的居里温度高于室温，是集成到磁性异质结的理想候选者。', start: 362.57, end: 375.05 },
+  { speaker: '小北', content: '真的吗？高于室温太关键了！不然还要专门冷却的话，普通消费者根本没法用啊。', start: 375.05, end: 382.66 },
+  { speaker: '阿南', content: '没错。所以这项研究对于设计基于二维范德华铁磁材料的高性能、低功耗自旋电子器件至关重要。', start: 382.66, end: 391.75 },
+  { speaker: '小北', content: '诶~ 听你这么一总结，我感觉这篇论文的核心价值就在于发现了超低阻尼的机制和调控方法对吧？', start: 391.75, end: 401.05 },
+  { speaker: '阿南', content: '总结得很到位。它揭示了低维结构导致的非典型磁化弛豫，打破了传统材料阻尼下限的限制。', start: 401.05, end: 409.72 },
+  { speaker: '小北', content: '哇，今天的干货真多！虽然物理概念有点难，但感觉打开了新世界的大门，谢谢阿南的讲解！', start: 409.72, end: 418.38 },
+  { speaker: '阿南', content: '不客气。希望听众朋友们能从中感受到凝聚态物理的魅力，我们下期节目再见。', start: 418.38, end: 425.78 },
 ]
 const demoCurrentLine = ref(-1)
 const subtitleContainer = ref<HTMLElement | null>(null)
 
-// 根据时间计算当前字幕行
+// 根据时间计算当前字幕行（使用时间戳精确匹配）
 const calculateCurrentLine = (time: number) => {
-  if (!demoScript.length || !demoDuration.value) return -1
-  const lineDuration = demoDuration.value / demoScript.length
-  return Math.min(Math.floor(time / lineDuration), demoScript.length - 1)
+  for (let i = 0; i < demoScript.length; i++) {
+    if (time >= demoScript[i].start && time < demoScript[i].end) {
+      return i
+    }
+  }
+  return -1
 }
 
-// 根据字幕行计算时间
+// 根据字幕行获取开始时间
 const getTimeForLine = (lineIndex: number) => {
-  if (!demoScript.length || !demoDuration.value) return 0
-  const lineDuration = demoDuration.value / demoScript.length
-  return lineIndex * lineDuration
+  if (lineIndex >= 0 && lineIndex < demoScript.length) {
+    return demoScript[lineIndex].start
+  }
+  return 0
 }
 
 const toggleDemoAudio = () => {
   if (!demoAudio.value) {
     demoAudio.value = new Audio('http://139.196.211.206/audio/demo_chapter_1.mp3')
     demoAudio.value.onloadedmetadata = () => {
-      demoDuration.value = demoAudio.value?.duration || 426
+      demoDuration.value = demoAudio.value?.duration || 425.78
     }
     demoAudio.value.ontimeupdate = () => {
       if (demoAudio.value) {
