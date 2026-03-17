@@ -8,10 +8,6 @@ echo "🚀 开始部署枕边书..."
 # 进入项目目录
 cd /home/admin/.openclaw/workspace/book-to-podcast
 
-# 拉取最新代码（可选）
-# echo "📥 拉取最新代码..."
-# git pull origin whiteclaw_0314
-
 # 构建前端 - 服务器版本（根路径）
 echo "🔨 构建服务器版本前端..."
 cd frontend
@@ -34,16 +30,14 @@ git add -A
 git commit -m "deploy: 更新前端" || true
 git push origin whiteclaw_0314
 
-# 重启后端
-echo "🔄 重启后端..."
-pkill -f "uvicorn" 2>/dev/null || true
-sleep 2
-cd backend
-nohup python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /var/log/book2podcast/app.log 2>&1 &
+# 重启后端服务（使用 systemd）
+echo "🔄 重启后端服务..."
+sudo systemctl restart book2podcast
 
 # 检查状态
 echo "✅ 检查服务状态..."
 sleep 3
+sudo systemctl status book2podcast --no-pager
 curl -s http://localhost/health
 
 echo ""

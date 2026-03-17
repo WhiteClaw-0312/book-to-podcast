@@ -8,11 +8,9 @@ const router = createRouter({
   history: createWebHistory('/book-to-podcast/'),
   routes: [
     { path: '/', component: () => import('./views/Home.vue') },
-    { path: '/upload', component: () => import('./views/Upload.vue') },
     { path: '/book/:id', component: () => import('./views/BookDetail.vue') },
     { path: '/book/:id/script', component: () => import('./views/ScriptEditor.vue') },
     { path: '/prompts', component: () => import('./views/PromptEditor.vue') },
-    { path: '/history', component: () => import('./views/History.vue') },
     { path: '/balance', component: () => import('./views/Balance.vue') }
   ]
 })

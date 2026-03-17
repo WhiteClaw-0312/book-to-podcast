@@ -171,21 +171,32 @@ async def preview_voice_by_edge_id(edge_voice_id: str):
     
     preview_file = os.path.join(preview_dir, f"{edge_voice_id}.mp3")
     
-    # 如果已存在且不超过1小时，直接返回
+    # 如果已存在且有效（非空且不超过1小时），直接返回
     if os.path.exists(preview_file):
         import time
+        file_size = os.path.getsize(preview_file)
         file_age = time.time() - os.path.getmtime(preview_file)
-        if file_age < 3600:  # 1小时内
+        # 文件有效：大小>1000字节 且 时间<1小时
+        if file_size > 1000 and file_age < 3600:
             return FileResponse(
                 preview_file,
                 media_type="audio/mpeg",
                 filename=f"preview.mp3"
             )
+        # 文件无效，删除重新生成
+        try:
+            os.remove(preview_file)
+        except:
+            pass
     
     # 生成预览音频
     try:
         communicate = edge_tts.Communicate(preview_text, edge_voice_id)
         await communicate.save(preview_file)
+        
+        # 验证生成的文件
+        if not os.path.exists(preview_file) or os.path.getsize(preview_file) < 1000:
+            raise Exception("音频生成失败或文件过小")
         
         return FileResponse(
             preview_file,
@@ -193,4 +204,10 @@ async def preview_voice_by_edge_id(edge_voice_id: str):
             filename=f"preview.mp3"
         )
     except Exception as e:
+        # 清理可能存在的空文件
+        if os.path.exists(preview_file):
+            try:
+                os.remove(preview_file)
+            except:
+                pass
         raise HTTPException(500, f"生成预览失败: {str(e)}")

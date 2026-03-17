@@ -165,6 +165,51 @@ async def process_book(book_id: str):
         db.close()
 
 
+@router.get("/my-books")
+async def get_my_books(
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """获取用户的所有书籍（历史记录）"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    # 查询用户的书籍
+    books = db.query(Book).filter(
+        Book.api_key == user.api_key
+    ).order_by(Book.created_at.desc()).all()
+    
+    result = []
+    for book in books:
+        chapters = db.query(Chapter).filter(
+            Chapter.book_id == book.id
+        ).order_by(Chapter.number).all()
+        
+        result.append({
+            "id": book.id,
+            "title": book.title,
+            "status": book.status,
+            "total_chapters": book.total_chapters,
+            "completed_chapters": book.completed_chapters,
+            "created_at": book.created_at.isoformat() if book.created_at else None,
+            "expires_at": book.expires_at.isoformat() if book.expires_at else None,
+            "chapters": [
+                {
+                    "id": ch.id,
+                    "number": ch.number,
+                    "title": ch.title,
+                    "status": ch.status,
+                    "has_script": bool(ch.script),
+                    "has_audio": bool(ch.audio_path),
+                    "duration": ch.duration
+                } for ch in chapters
+            ]
+        })
+    
+    return result
+
+
 @router.get("/{book_id}", response_model=BookStatusResponse)
 async def get_book_status(book_id: str, db: Session = Depends(get_db)):
     """获取书籍状态"""
@@ -761,54 +806,22 @@ async def update_script(
     if not chapter:
         raise HTTPException(404, "章节不存在")
     
-    # 保存用户编辑的文稿
-    chapter.script = json.dumps(data.get("dialogues", []), ensure_ascii=False)
+    # 获取现有文稿结构
+    existing_script = {}
+    if chapter.script:
+        try:
+            existing_script = json.loads(chapter.script)
+        except:
+            pass
+    
+    # 更新 dialogues，保持完整结构
+    dialogues = data.get("dialogues", [])
+    existing_script["dialogues"] = dialogues
+    existing_script["chapter_number"] = chapter_num
+    existing_script["chapter_title"] = chapter.title
+    
+    chapter.script = json.dumps(existing_script, ensure_ascii=False)
     chapter.script_edited = chapter.script  # 标记为用户编辑过
     db.commit()
     
     return {"message": "文稿已保存"}
-
-
-@router.get("/my-books")
-async def get_my_books(
-    db: Session = Depends(get_db),
-    user: Optional[User] = Depends(get_optional_user)
-):
-    """获取用户的所有书籍（历史记录）"""
-    
-    if not user:
-        raise HTTPException(401, "请先登录")
-    
-    # 查询用户的书籍
-    books = db.query(Book).filter(
-        Book.api_key == user.api_key
-    ).order_by(Book.created_at.desc()).all()
-    
-    result = []
-    for book in books:
-        chapters = db.query(Chapter).filter(
-            Chapter.book_id == book.id
-        ).order_by(Chapter.number).all()
-        
-        result.append({
-            "id": book.id,
-            "title": book.title,
-            "status": book.status,
-            "total_chapters": book.total_chapters,
-            "completed_chapters": book.completed_chapters,
-            "created_at": book.created_at.isoformat() if book.created_at else None,
-            "expires_at": book.expires_at.isoformat() if book.expires_at else None,
-            "chapters": [
-                {
-                    "id": ch.id,
-                    "number": ch.number,
-                    "title": ch.title,
-                    "status": ch.status,
-                    "has_script": bool(ch.script),
-                    "has_audio": bool(ch.audio_path),
-                    "duration": ch.duration
-                } for ch in chapters
-            ]
-        })
-    
-    return result

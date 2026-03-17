@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { apiFetch } from '../api'
 import AuthModal from '../components/AuthModal.vue'
-
-const router = useRouter()
 
 // 用户状态
 const user = ref<any>(null)
@@ -18,7 +15,27 @@ const showCertHint = ref(false)
 // 文件上传
 const file = ref<File | null>(null)
 const uploading = ref(false)
-const bookId = ref('')
+const uploadProgress = ref('')
+
+// 生成队列
+const queueBooks = ref<any[]>([])
+const loadingQueue = ref(false)
+
+// 当前选中查看的书籍
+const selectedBookId = ref<string | null>(null)
+const selectedBook = ref<any>(null)
+const queueProgress = ref<any>(null)
+const tasks = ref<any[]>([])
+const pollingTimer = ref<any>(null)
+
+// 音色相关
+const voices = ref<any[]>([])
+const showVoiceSelector = ref(false)
+const voiceMapping = ref<Record<string, string>>({
+  '小北': 'zh-CN-XiaoxiaoNeural',
+  '阿南': 'zh-CN-YunxiNeural'
+})
+const selectedChapters = ref<number[]>([])
 
 // 检查后端状态
 const checkBackend = async () => {
@@ -30,17 +47,6 @@ const checkBackend = async () => {
     }
   } catch {
     backendOnline.value = false
-  }
-}
-
-// 接受证书 - 直接切换到服务器版本
-const acceptCertificate = async () => {
-  // 如果在 GitHub Pages，直接跳转到服务器
-  if (isGitHubPages) {
-    window.location.href = 'http://139.196.211.206/'
-  } else {
-    // 非GitHub Pages，尝试刷新
-    await refreshStatus()
   }
 }
 
@@ -59,14 +65,28 @@ const refreshStatus = async () => {
 // 检测是否在 GitHub Pages 上
 const isGitHubPages = window.location.hostname.includes('github.io')
 
-// 检查用户登录状态
-const checkUser = () => {
+// 检查用户登录状态 - 增加服务器验证
+const checkUser = async () => {
   const token = localStorage.getItem('token')
   const userData = localStorage.getItem('user')
   
   if (token && userData) {
     try {
       user.value = JSON.parse(userData)
+      
+      // 验证 token 是否有效
+      const res = await apiFetch('/api/auth/me')
+      if (res.status === 401) {
+        // Token 无效，清除登录状态
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        user.value = null
+      } else if (res.ok) {
+        // Token 有效，更新用户信息
+        const data = await res.json()
+        user.value = data
+        localStorage.setItem('user', JSON.stringify(data))
+      }
     } catch {
       user.value = null
     }
@@ -101,6 +121,7 @@ const upload = async () => {
   }
   
   uploading.value = true
+  uploadProgress.value = '上传中...'
   
   const form = new FormData()
   form.append('file', file.value)
@@ -114,10 +135,14 @@ const upload = async () => {
     })
     
     if (res.status === 401) {
-      // 未登录
+      // Token 失效，清除登录状态
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      user.value = null
       authMode.value = 'login'
       showAuthModal.value = true
       uploading.value = false
+      uploadProgress.value = ''
       return
     }
     
@@ -127,19 +152,33 @@ const upload = async () => {
     }
     
     const data = await res.json()
-    bookId.value = data.id
-    router.push(`/book/${bookId.value}`)
+    uploadProgress.value = '上传成功，正在识别...'
+    file.value = null
+    
+    // 刷新队列
+    await fetchQueue()
+    
+    // 自动选中刚上传的书籍
+    selectedBookId.value = data.id
+    await selectBook(data.id)
+    
+    // 清除文件选择
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    if (fileInput) fileInput.value = ''
     
   } catch (e: any) {
     alert('上传失败: ' + e.message)
+    uploadProgress.value = ''
   } finally {
     uploading.value = false
   }
 }
 
 // 登录成功
-const onAuthSuccess = (userData: any) => {
+const onAuthSuccess = async (userData: any) => {
   user.value = userData
+  // 刷新队列
+  await fetchQueue()
   // 自动继续上传
   if (file.value) {
     upload()
@@ -151,6 +190,9 @@ const logout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('user')
   user.value = null
+  queueBooks.value = []
+  selectedBook.value = null
+  selectedBookId.value = null
 }
 
 // 显示登录/注册
@@ -164,10 +206,300 @@ const showRegister = () => {
   showAuthModal.value = true
 }
 
-onMounted(() => {
-  checkBackend()
-  checkUser()
+// 获取生成队列
+const fetchQueue = async () => {
+  if (!user.value) return
+  
+  loadingQueue.value = true
+  try {
+    const token = localStorage.getItem('token')
+    const res = await apiFetch('/api/books/my-books', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      queueBooks.value = await res.json()
+    } else if (res.status === 401) {
+      // Token 失效
+      logout()
+    }
+  } catch (e) {
+    console.error('获取队列失败', e)
+  }
+  loadingQueue.value = false
+}
+
+// 选中书籍查看详情
+const selectBook = async (bookId: string) => {
+  if (selectedBookId.value === bookId) {
+    // 取消选中
+    selectedBookId.value = null
+    selectedBook.value = null
+    stopPolling()
+    return
+  }
+  
+  selectedBookId.value = bookId
+  await fetchBookDetail()
+  
+  // 如果正在处理，开始轮询
+  if (selectedBook.value?.status === 'generating_script' || selectedBook.value?.status === 'generating_audio') {
+    startPolling()
+  }
+}
+
+// 获取书籍详情
+const fetchBookDetail = async () => {
+  if (!selectedBookId.value) return
+  
+  try {
+    const res = await apiFetch(`/api/books/${selectedBookId.value}`)
+    if (res.ok) {
+      selectedBook.value = await res.json()
+    }
+  } catch (e) {
+    console.error('获取书籍详情失败', e)
+  }
+}
+
+// 获取进度
+const fetchProgress = async () => {
+  if (!selectedBookId.value) return
+  
+  try {
+    const res = await apiFetch(`/api/books/${selectedBookId.value}/progress`)
+    const data = await res.json()
+    queueProgress.value = data.queue
+    tasks.value = data.tasks || []
+    
+    // 更新书籍状态
+    await fetchBookDetail()
+    await fetchQueue()
+    
+    // 如果完成，停止轮询
+    if (data.queue?.status === 'completed' || data.book_status === 'script_ready' || data.book_status === 'completed') {
+      stopPolling()
+    }
+  } catch (e) {
+    console.error('获取进度失败', e)
+  }
+}
+
+// 开始轮询进度
+const startPolling = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+  }
+  pollingTimer.value = setInterval(fetchProgress, 2000)
+}
+
+// 停止轮询
+const stopPolling = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+}
+
+// 获取音色列表
+const fetchVoices = async () => {
+  try {
+    const res = await apiFetch('/api/voices')
+    if (res.ok) {
+      voices.value = await res.json()
+    }
+  } catch (e) {
+    console.error('获取音色失败', e)
+  }
+}
+
+// 女声音色列表
+const femaleVoices = computed(() => voices.value.filter(v => v.gender === 'female'))
+const maleVoices = computed(() => voices.value.filter(v => v.gender === 'male'))
+
+// 预览音色
+const previewingVoice = ref<string | null>(null)
+const previewAudio = ref<HTMLAudioElement | null>(null)
+
+const previewVoice = async (voiceId: string) => {
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value = null
+  }
+  
+  previewingVoice.value = voiceId
+  
+  try {
+    const audioUrl = `http://139.196.211.206/api/voices/edge-id/${voiceId}/preview`
+    const audio = new Audio(audioUrl)
+    previewAudio.value = audio
+    
+    audio.onended = () => {
+      previewingVoice.value = null
+    }
+    
+    audio.onerror = () => {
+      previewingVoice.value = null
+    }
+    
+    await audio.play()
+  } catch (e) {
+    previewingVoice.value = null
+  }
+}
+
+const stopPreview = () => {
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value = null
+  }
+  previewingVoice.value = null
+}
+
+// 选择章节
+const toggleChapter = (num: number) => {
+  if (selectedChapters.value.includes(num)) {
+    selectedChapters.value = selectedChapters.value.filter(n => n !== num)
+  } else {
+    selectedChapters.value.push(num)
+  }
+}
+
+const selectAllChapters = () => {
+  if (selectedBook.value) {
+    selectedChapters.value = selectedBook.value.chapters.map((c: any) => c.number)
+  }
+}
+
+const deselectAllChapters = () => {
+  selectedChapters.value = []
+}
+
+// 生成文稿
+const generateScripts = async () => {
+  if (!selectedChapters.value.length || !selectedBookId.value) return
+  
+  try {
+    const token = localStorage.getItem('token')
+    const res = await apiFetch(`/api/books/${selectedBookId.value}/generate-script`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      body: JSON.stringify({
+        chapters: selectedChapters.value
+      })
+    })
+    
+    if (res.ok) {
+      selectedChapters.value = []
+      startPolling()
+    } else {
+      const err = await res.json()
+      throw new Error(err.detail || '生成失败')
+    }
+  } catch (e: any) {
+    alert('生成文稿失败: ' + e.message)
+  }
+}
+
+// 显示音色选择器
+const openVoiceSelector = () => {
+  showVoiceSelector.value = true
+}
+
+// 确认生成音频
+const confirmGenerateAudio = async () => {
+  if (!selectedChapters.value.length || !selectedBookId.value) return
+  
+  showVoiceSelector.value = false
+  
+  try {
+    const token = localStorage.getItem('token')
+    const res = await apiFetch(`/api/books/${selectedBookId.value}/generate-audio`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      body: JSON.stringify({
+        chapters: selectedChapters.value,
+        voice_mapping: voiceMapping.value
+      })
+    })
+    
+    if (res.ok) {
+      selectedChapters.value = []
+      startPolling()
+    } else {
+      const err = await res.json()
+      throw new Error(err.detail || '生成失败')
+    }
+  } catch (e: any) {
+    alert('生成音频失败: ' + e.message)
+  }
+}
+
+// 删除书籍
+const deleteBook = async (bookId: string) => {
+  if (!confirm('确定删除此书籍？文稿和音频将一并删除。')) return
+  
+  try {
+    const token = localStorage.getItem('token')
+    const res = await apiFetch(`/api/books/${bookId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (res.ok) {
+      queueBooks.value = queueBooks.value.filter(b => b.id !== bookId)
+      if (selectedBookId.value === bookId) {
+        selectedBookId.value = null
+        selectedBook.value = null
+        stopPolling()
+      }
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+// 格式化时间
+const formatTime = (seconds: number) => {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// 统计
+const stats = computed(() => {
+  const totalBooks = queueBooks.value.length
+  const totalScripts = queueBooks.value.reduce((sum, b) => 
+    sum + (b.chapters?.filter((c: any) => c.has_script).length || 0), 0
+  )
+  const totalAudio = queueBooks.value.reduce((sum, b) => 
+    sum + (b.chapters?.filter((c: any) => c.has_audio).length || 0), 0
+  )
+  return { totalBooks, totalScripts, totalAudio }
+})
+
+// 选中的章节数
+const selectedCount = computed(() => selectedChapters.value.length)
+
+onMounted(async () => {
+  await checkBackend()
+  await checkUser()
+  await fetchVoices()
+  if (user.value) {
+    await fetchQueue()
+  }
   setInterval(checkBackend, 30000)
+})
+
+onUnmounted(() => {
+  stopPolling()
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+  }
 })
 </script>
 
@@ -189,9 +521,6 @@ onMounted(() => {
           {{ backendOnline ? '● 在线' : '○ 离线' }}
         </div>
         <div v-if="user" class="user-info">
-          <button class="history-btn" @click="router.push('/history')" title="历史记录">
-            📜 历史
-          </button>
           <span class="user-name">{{ user.nickname || user.email }}</span>
           <span class="user-balance">{{ user.balance + user.free_quota }}次</span>
           <button class="logout-btn" @click="logout">退出</button>
@@ -230,7 +559,7 @@ onMounted(() => {
         @click="upload" 
         :disabled="!file || uploading"
       >
-        {{ uploading ? '⏳ 上传中...' : '🚀 开始生成播客' }}
+        {{ uploading ? '⏳ ' + uploadProgress : '🚀 开始生成播客' }}
       </button>
       
       <p class="upload-tip" v-if="!user">
@@ -288,6 +617,178 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- 生成队列 -->
+    <div class="card queue-card" v-if="user">
+      <h2 class="card-title">📋 生成队列</h2>
+      
+      <!-- 未登录提示 -->
+      <div v-if="!user" class="queue-empty">
+        <p>请先登录查看生成队列</p>
+      </div>
+      
+      <!-- 加载中 -->
+      <div v-else-if="loadingQueue" class="queue-loading">
+        <span>加载中...</span>
+      </div>
+      
+      <!-- 空队列 -->
+      <div v-else-if="queueBooks.length === 0" class="queue-empty">
+        <p>暂无生成任务</p>
+        <p class="queue-hint">上传文件后，任务将在这里显示</p>
+      </div>
+      
+      <!-- 队列列表 -->
+      <div v-else class="queue-list">
+        <!-- 书籍列表 -->
+        <div 
+          v-for="book in queueBooks" 
+          :key="book.id" 
+          :class="['queue-item', { expanded: selectedBookId === book.id }]"
+        >
+          <!-- 书籍标题行 -->
+          <div class="queue-item-header" @click="selectBook(book.id)">
+            <div class="queue-item-info">
+              <span class="queue-item-title">{{ book.title }}</span>
+              <span class="queue-item-meta">
+                {{ book.total_chapters }}章 · {{ formatDate(book.created_at) }}
+              </span>
+            </div>
+            <div class="queue-item-status">
+              <span v-if="book.status === 'ready'" class="status-tag ready">📄 OCR完成</span>
+              <span v-else-if="book.status === 'script_ready'" class="status-tag script">📝 文稿就绪</span>
+              <span v-else-if="book.status === 'generating_script'" class="status-tag processing">⏳ 生成文稿中</span>
+              <span v-else-if="book.status === 'generating_audio'" class="status-tag processing">⏳ 生成音频中</span>
+              <span v-else-if="book.status === 'completed'" class="status-tag completed">✅ 已完成</span>
+              <span v-else-if="book.status === 'partial'" class="status-tag partial">📊 部分完成</span>
+              <span v-else class="status-tag">{{ book.status }}</span>
+            </div>
+            <button class="delete-btn" @click.stop="deleteBook(book.id)" title="删除">🗑️</button>
+          </div>
+          
+          <!-- 展开的详情 -->
+          <div v-if="selectedBookId === book.id" class="queue-item-detail">
+            <!-- 正在生成文稿 -->
+            <div v-if="book.status === 'generating_script'" class="progress-section">
+              <div class="progress-header">
+                <span class="progress-label">文稿生成进度</span>
+                <span class="progress-percent">{{ queueProgress?.progress || 0 }}%</span>
+              </div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill" :style="{ width: (queueProgress?.progress || 0) + '%' }"></div>
+              </div>
+              <div class="progress-stats">
+                <span>{{ queueProgress?.completed || 0 }} / {{ queueProgress?.total || 0 }} 章</span>
+              </div>
+              
+              <!-- 任务列表 -->
+              <div class="tasks-list" v-if="tasks.length > 0">
+                <div v-for="task in tasks" :key="task.id" class="task-item">
+                  <span class="task-chapter">第{{ task.chapter_number }}章</span>
+                  <span :class="['task-status', task.status]">
+                    {{ task.status === 'pending' ? '⏳' : task.status === 'processing' ? '🔄' : task.status === 'completed' ? '✅' : '❌' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 正在生成音频 -->
+            <div v-else-if="book.status === 'generating_audio'" class="progress-section">
+              <div class="progress-header">
+                <span class="progress-label">音频生成进度</span>
+                <span class="progress-percent">{{ queueProgress?.progress || 0 }}%</span>
+              </div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill audio" :style="{ width: (queueProgress?.progress || 0) + '%' }"></div>
+              </div>
+              <div class="progress-stats">
+                <span>{{ queueProgress?.completed || 0 }} / {{ queueProgress?.total || 0 }} 章</span>
+              </div>
+              
+              <!-- 任务列表 -->
+              <div class="tasks-list" v-if="tasks.length > 0">
+                <div v-for="task in tasks" :key="task.id" class="task-item">
+                  <span class="task-chapter">第{{ task.chapter_number }}章</span>
+                  <span :class="['task-status', task.status]">
+                    {{ task.status === 'pending' ? '⏳' : task.status === 'processing' ? '🔄' : task.status === 'completed' ? '✅' : '❌' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- OCR完成，可以选择生成文稿 -->
+            <div v-else-if="book.status === 'ready'" class="action-section">
+              <p class="action-hint">选择章节生成文稿（免费）</p>
+              <div class="chapter-select">
+                <button class="btn-small" @click="selectAllChapters">全选</button>
+                <button class="btn-small" @click="deselectAllChapters">全不选</button>
+              </div>
+              <div class="chapter-grid">
+                <div
+                  v-for="ch in selectedBook?.chapters || []"
+                  :key="ch.number"
+                  :class="['chapter-chip', { selected: selectedChapters.includes(ch.number) }]"
+                  @click="toggleChapter(ch.number)"
+                >
+                  {{ ch.number }}
+                </div>
+              </div>
+              <button 
+                class="btn btn-primary action-btn"
+                @click="generateScripts"
+                :disabled="!selectedCount"
+              >
+                📝 生成文稿（已选 {{ selectedCount }} 章）
+              </button>
+            </div>
+            
+            <!-- 文稿就绪，可以生成音频 -->
+            <div v-else-if="book.status === 'script_ready' || book.status === 'partial'" class="action-section">
+              <p class="action-hint">选择章节生成音频（需要扣费）</p>
+              <div class="chapter-list-detail">
+                <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row">
+                  <div class="chapter-info">
+                    <span class="chapter-num">第{{ ch.number }}章</span>
+                    <span class="chapter-title">{{ ch.title }}</span>
+                  </div>
+                  <div class="chapter-status">
+                    <span v-if="ch.has_audio" class="has-audio">✅ 音频 {{ formatTime(ch.duration) }}</span>
+                    <label v-else class="checkbox-label" @click.stop>
+                      <input 
+                        type="checkbox" 
+                        :checked="selectedChapters.includes(ch.number)"
+                        @change="toggleChapter(ch.number)"
+                      />
+                      生成音频
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div v-if="selectedCount > 0" class="generate-action">
+                <span class="cost-hint">需要 {{ selectedCount }} 次额度</span>
+                <button class="btn btn-primary" @click="openVoiceSelector">🎙️ 生成音频</button>
+              </div>
+            </div>
+            
+            <!-- 已完成 -->
+            <div v-else-if="book.status === 'completed'" class="completed-section">
+              <p class="completed-hint">🎉 所有章节已完成，点击章节播放音频</p>
+              <div class="chapter-list-detail">
+                <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row clickable">
+                  <div class="chapter-info">
+                    <span class="chapter-num">第{{ ch.number }}章</span>
+                    <span class="chapter-title">{{ ch.title }}</span>
+                  </div>
+                  <div class="chapter-status">
+                    <span class="has-audio">🎧 {{ formatTime(ch.duration) }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 登录/注册对话框 -->
     <AuthModal 
       v-if="showAuthModal"
@@ -321,11 +822,75 @@ onMounted(() => {
               🔄 刷新状态
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 音色选择弹窗 -->
+    <div v-if="showVoiceSelector" class="modal-overlay" @click.self="showVoiceSelector = false">
+      <div class="modal-content voice-modal">
+        <div class="modal-header">
+          <h2>🎭 选择音色</h2>
+          <button class="close-btn" @click="showVoiceSelector = false">×</button>
+        </div>
+        
+        <div class="voice-selector-body">
+          <p class="voice-hint">为播客中的角色选择合适的音色</p>
           
-          <p class="hint-note" v-if="isGitHubPages">
-            💡 点击后将跳转到 http://139.196.211.206<br>
-            推荐使用服务器版本获得最佳体验
-          </p>
+          <!-- 小北（女声） -->
+          <div class="voice-group">
+            <h3>👩 小北（女主持）</h3>
+            <div class="voice-options">
+              <div 
+                v-for="v in femaleVoices" 
+                :key="v.id"
+                :class="['voice-option', { selected: voiceMapping['小北'] === v.voice_id }]"
+                @click="voiceMapping['小北'] = v.voice_id"
+              >
+                <div class="voice-header">
+                  <div class="voice-name">{{ v.speaker_name }}</div>
+                  <button 
+                    class="preview-btn"
+                    @click.stop="previewingVoice === v.voice_id ? stopPreview() : previewVoice(v.voice_id)"
+                  >
+                    {{ previewingVoice === v.voice_id ? '⏹️' : '▶️' }}
+                  </button>
+                </div>
+                <div class="voice-desc">{{ v.description }}</div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 阿南（男声） -->
+          <div class="voice-group">
+            <h3>👨 阿南（男主持）</h3>
+            <div class="voice-options">
+              <div 
+                v-for="v in maleVoices" 
+                :key="v.id"
+                :class="['voice-option', { selected: voiceMapping['阿南'] === v.voice_id }]"
+                @click="voiceMapping['阿南'] = v.voice_id"
+              >
+                <div class="voice-header">
+                  <div class="voice-name">{{ v.speaker_name }}</div>
+                  <button 
+                    class="preview-btn"
+                    @click.stop="previewingVoice === v.voice_id ? stopPreview() : previewVoice(v.voice_id)"
+                  >
+                    {{ previewingVoice === v.voice_id ? '⏹️' : '▶️' }}
+                  </button>
+                </div>
+                <div class="voice-desc">{{ v.description }}</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="voice-actions">
+            <button class="btn btn-secondary" @click="showVoiceSelector = false">取消</button>
+            <button class="btn btn-primary" @click="confirmGenerateAudio">
+              🎙️ 开始生成 {{ selectedCount }} 章
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -381,27 +946,13 @@ onMounted(() => {
   background: rgba(244, 67, 54, 0.2);
   border-color: #f44336;
   color: #ef5350;
+  cursor: pointer;
 }
 
 .user-info {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.history-btn {
-  background: rgba(76, 175, 80, 0.2);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-  color: #81c784;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.3s;
-}
-
-.history-btn:hover {
-  background: rgba(76, 175, 80, 0.3);
 }
 
 .user-name {
@@ -590,23 +1141,329 @@ onMounted(() => {
   color: #666;
 }
 
-@media (max-width: 600px) {
-  .pricing-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .header-card {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  
-  .header-right {
-    width: 100%;
-    justify-content: space-between;
-  }
+/* Queue */
+.queue-card {
+  margin-top: 20px;
 }
 
-/* 离线提示弹窗 */
+.queue-loading, .queue-empty {
+  text-align: center;
+  padding: 40px;
+  color: #81c784;
+}
+
+.queue-hint {
+  font-size: 12px;
+  color: #666;
+  margin-top: 8px;
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.queue-item {
+  background: rgba(0, 30, 20, 0.4);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.queue-item.expanded {
+  border-color: #4caf50;
+}
+
+.queue-item-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.queue-item-header:hover {
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.queue-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.queue-item-title {
+  display: block;
+  color: #e8f5e9;
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-item-meta {
+  font-size: 12px;
+  color: #81c784;
+}
+
+.queue-item-status {
+  flex-shrink: 0;
+}
+
+.status-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+}
+
+.status-tag.ready { background: rgba(76, 175, 80, 0.2); color: #81c784; }
+.status-tag.script { background: rgba(33, 150, 243, 0.2); color: #64b5f6; }
+.status-tag.processing { background: rgba(255, 152, 0, 0.2); color: #ffb74d; }
+.status-tag.completed { background: rgba(76, 175, 80, 0.3); color: #a5d6a7; }
+.status-tag.partial { background: rgba(156, 39, 176, 0.2); color: #ce93d8; }
+
+.delete-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.delete-btn:hover {
+  opacity: 1;
+}
+
+/* Queue item detail */
+.queue-item-detail {
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+  padding: 16px;
+}
+
+.progress-section {
+  margin-bottom: 16px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.progress-label {
+  color: #a5d6a7;
+  font-size: 13px;
+}
+
+.progress-percent {
+  color: #4caf50;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.progress-bar-container {
+  height: 8px;
+  background: rgba(76, 175, 80, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4caf50, #81c784);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.progress-bar-fill.audio {
+  background: linear-gradient(90deg, #2196f3, #64b5f6);
+}
+
+.progress-stats {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #81c784;
+}
+
+.tasks-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 30, 20, 0.6);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.task-chapter {
+  color: #e8f5e9;
+}
+
+.task-status.pending { color: #ffb74d; }
+.task-status.processing { color: #64b5f6; }
+.task-status.completed { color: #81c784; }
+.task-status.failed { color: #ef5350; }
+
+/* Action section */
+.action-section {
+  padding: 8px 0;
+}
+
+.action-hint {
+  color: #81c784;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.chapter-select {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.btn-small {
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: #81c784;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chapter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.chapter-chip {
+  text-align: center;
+  padding: 8px 4px;
+  background: rgba(0, 30, 20, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 6px;
+  color: #81c784;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chapter-chip:hover {
+  border-color: #4caf50;
+}
+
+.chapter-chip.selected {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.2);
+  color: #a5d6a7;
+}
+
+.action-btn {
+  width: 100%;
+}
+
+/* Chapter list detail */
+.chapter-list-detail {
+  margin-bottom: 16px;
+}
+
+.chapter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(76, 175, 80, 0.1);
+}
+
+.chapter-row.clickable {
+  cursor: pointer;
+}
+
+.chapter-row.clickable:hover {
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.chapter-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chapter-num {
+  color: #4caf50;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chapter-title {
+  color: #e8f5e9;
+  font-size: 13px;
+}
+
+.chapter-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.has-audio {
+  color: #81c784;
+  font-size: 12px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #81c784;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  width: 14px;
+  height: 14px;
+}
+
+.generate-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.cost-hint {
+  color: #81c784;
+  font-size: 12px;
+}
+
+/* Completed section */
+.completed-section {
+  padding: 8px 0;
+}
+
+.completed-hint {
+  color: #a5d6a7;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* Modal */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -653,10 +1510,6 @@ onMounted(() => {
   line-height: 1;
 }
 
-.close-btn:hover {
-  color: #4caf50;
-}
-
 .cert-hint-modal {
   max-width: 420px;
 }
@@ -683,7 +1536,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  margin-bottom: 16px;
 }
 
 .hint-actions .big-btn {
@@ -693,7 +1545,6 @@ onMounted(() => {
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
 }
 
 .hint-actions .btn-primary {
@@ -702,39 +1553,120 @@ onMounted(() => {
   color: white;
 }
 
-.hint-actions .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(76, 175, 80, 0.4);
-}
-
 .hint-actions .btn-secondary {
   background: rgba(76, 175, 80, 0.2);
   border: 1px solid rgba(76, 175, 80, 0.3);
   color: #81c784;
 }
 
-.hint-actions .btn-secondary:hover {
-  background: rgba(76, 175, 80, 0.3);
+/* Voice selector */
+.voice-modal {
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 
-.hint-note {
+.voice-selector-body {
+  padding: 10px 0;
+}
+
+.voice-hint {
   color: #81c784;
-  font-size: 12px;
-  text-align: center;
-  background: rgba(76, 175, 80, 0.1);
-  padding: 12px;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.voice-group {
+  margin-bottom: 20px;
+}
+
+.voice-group h3 {
+  color: #e8f5e9;
+  font-size: 14px;
+  margin: 0 0 10px 0;
+}
+
+.voice-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.voice-option {
+  background: rgba(0, 30, 20, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
   border-radius: 8px;
-  margin: 0;
-  line-height: 1.6;
-}
-
-.status-badge.offline {
+  padding: 10px;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.2s;
 }
 
-.status-badge.offline:hover {
-  transform: scale(1.05);
-  box-shadow: 0 0 12px rgba(244, 67, 54, 0.4);
+.voice-option:hover {
+  border-color: rgba(76, 175, 80, 0.5);
+}
+
+.voice-option.selected {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.15);
+}
+
+.voice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.voice-name {
+  color: #e8f5e9;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.preview-btn {
+  background: rgba(33, 150, 243, 0.2);
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.voice-desc {
+  color: #81c784;
+  font-size: 11px;
+}
+
+.voice-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+@media (max-width: 600px) {
+  .pricing-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .header-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .voice-options {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
