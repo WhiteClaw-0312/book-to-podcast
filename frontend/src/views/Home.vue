@@ -73,20 +73,47 @@ const demoAudio = ref<HTMLAudioElement | null>(null)
 const demoPlaying = ref(false)
 const demoProgress = ref(0)
 const demoCurrentTime = ref(0)
-const demoDuration = ref(426) // 7:06
+const demoDuration = ref(426)
 
-// 示例字幕（简化版）
+// 示例字幕（完整版，与音频对应）
 const demoScript = [
-  { speaker: '小北', content: '哈喽大家好，欢迎收听今天的读书播客，我是你们充满好奇的小北！' },
-  { speaker: '阿南', content: '大家好，我是阿南。今天我们要解读的这本书，确实是一本非常独特的作品。' },
-  { speaker: '小北', content: '我刚刚拿到这个第一章的正文内容，说实话，我第一眼看上去有点懵呢！' },
-  { speaker: '阿南', content: '其实这并不意外。这本书的内容呈现出一种非常抽象的形式，可以说是一种尝试。' },
-  { speaker: '小北', content: '那这些符号，难道是在暗示什么特殊的密码或者隐藏信息吗？' },
-  { speaker: '阿南', content: '可以说有这种可能。在这种实验性的文本中，符号往往不仅仅是字符。' },
-  { speaker: '小北', content: '我觉得太有意思了！就像是在探索一个未知的领域，每一个字符都是一个谜题。' },
-  { speaker: '阿南', content: '没错。面对这样的文本，我们需要放下对传统叙事的期待。' },
+  { speaker: '小北', content: '欢迎收听今天的科技播客！阿南，今天我们要聊的这篇论文标题好长啊，什么对称性禁止之类的，听起来很高深呢。' },
+  { speaker: '阿南', content: '没错，标题确实有点复杂。其实简单来说，这篇论文讨论的是二维范德华铁磁体中超低吉尔伯特阻尼的现象。' },
+  { speaker: '小北', content: '哇，二维范德华铁磁体？这听起来像是那种可以像纸一样薄的磁性材料吗？真的存在这种东西？' },
+  { speaker: '阿南', content: '是的，比如CrI3、Fe3GeTe2这些材料。它们的发现不仅拓宽了磁性材料的视野，还为低维自旋电子学器件带来了希望。' },
+  { speaker: '小北', content: '诶~ 自旋电子学器件？这跟我们平时用的电子设备有什么关系吗？为什么要特别研究它们的磁性呢？' },
+  { speaker: '阿南', content: '关系很大。因为二维范德华铁磁体的磁性可以通过栅极电压或应变等独特方式来控制，这比传统材料灵活多了。' },
+  { speaker: '小北', content: '真的吗？那岂不是可以实现更小巧、更节能的设备？不过论文里提到的吉尔伯特阻尼又是什么呢？' },
+  { speaker: '阿南', content: '可以说它是磁化动力学中的一个关键参数。它决定了电流诱导磁化翻转的临界电流密度，以及翻转的速度。' },
+  { speaker: '小北', content: '哇，听起来像是某种阻力？那这个阻尼是越大越好，还是越小越好呢？我有点搞不清楚了。' },
+  { speaker: '阿南', content: '对于低功耗的存储和逻辑器件来说，低吉尔伯特阻尼是至关重要的。阻尼越低，能量消耗就越少，效率越高。' },
+  { speaker: '小北', content: '诶~ 原来是这样！那传统的铁磁材料，比如铁、钴、镍，它们的阻尼表现怎么样呢？有没有什么局限？' },
+  { speaker: '阿南', content: '传统材料的阻尼随温度变化是非单调的。低温下像电导率，高温下像电阻率，这限制了阻尼不能低于某个下限。' },
+  { speaker: '小北', content: '真的吗？也就是说传统材料不管怎么优化，阻尼都有一个最低限度，没法无限降低咯？' },
+  { speaker: '阿南', content: '没错。但这篇论文研究的二维铁磁金属，比如Fe3GaTe2，却表现出了单调的温度依赖性，这是一个非常不寻常的现象。' },
+  { speaker: '小北', content: '哇，单调依赖性？这意味着什么？是不是说随着温度变化，它的阻尼表现跟传统材料完全不一样？' },
+  { speaker: '阿南', content: '是的。研究发现，在低温下，由于镜像对称性禁止了带内跃迁，导致阻尼变得超低，甚至理论上没有下限。' },
+  { speaker: '小北', content: '诶~ 镜像对称性禁止带内跃迁？这听起来好抽象，对称性怎么还能禁止电子的跃迁呢？真的吗？' },
+  { speaker: '阿南', content: '其实可以理解为一种量子力学的选择定则。在这种对称性保护下，电子在某些能带之间的跳转被规则禁止了。' },
+  { speaker: '小北', content: '哇，就像是一条交通规则，告诉电子这条路不能走？那这样的话，能量损耗自然就变小了？' },
+  { speaker: '阿南', content: '没错，正是这个原因。因为带内跃迁被禁止，导电类的阻尼消失了，所以阻尼可以随着电子散射率的降低而任意减小。' },
 ]
-const demoCurrentLine = ref(0)
+const demoCurrentLine = ref(-1)
+const subtitleContainer = ref<HTMLElement | null>(null)
+
+// 根据时间计算当前字幕行
+const calculateCurrentLine = (time: number) => {
+  if (!demoScript.length || !demoDuration.value) return -1
+  const lineDuration = demoDuration.value / demoScript.length
+  return Math.min(Math.floor(time / lineDuration), demoScript.length - 1)
+}
+
+// 根据字幕行计算时间
+const getTimeForLine = (lineIndex: number) => {
+  if (!demoScript.length || !demoDuration.value) return 0
+  const lineDuration = demoDuration.value / demoScript.length
+  return lineIndex * lineDuration
+}
 
 const toggleDemoAudio = () => {
   if (!demoAudio.value) {
@@ -98,19 +125,19 @@ const toggleDemoAudio = () => {
       if (demoAudio.value) {
         demoCurrentTime.value = demoAudio.value.currentTime
         demoProgress.value = (demoAudio.value.currentTime / demoDuration.value) * 100
-        // 根据时间更新当前字幕行
-        const lineDuration = demoDuration.value / demoScript.length
-        demoCurrentLine.value = Math.min(
-          Math.floor(demoAudio.value.currentTime / lineDuration),
-          demoScript.length - 1
-        )
+        // 更新当前字幕行
+        const newLine = calculateCurrentLine(demoAudio.value.currentTime)
+        if (newLine !== demoCurrentLine.value) {
+          demoCurrentLine.value = newLine
+          scrollToCurrentLine(newLine)
+        }
       }
     }
     demoAudio.value.onended = () => {
       demoPlaying.value = false
       demoProgress.value = 0
       demoCurrentTime.value = 0
-      demoCurrentLine.value = 0
+      demoCurrentLine.value = -1
     }
   }
   
@@ -123,12 +150,35 @@ const toggleDemoAudio = () => {
   }
 }
 
+// 点击字幕跳转
+const jumpToLine = (lineIndex: number) => {
+  if (!demoAudio.value) return
+  const time = getTimeForLine(lineIndex)
+  demoAudio.value.currentTime = time
+  demoCurrentLine.value = lineIndex
+  if (!demoPlaying.value) {
+    demoAudio.value.play()
+    demoPlaying.value = true
+  }
+}
+
+// 滚动到当前字幕
+const scrollToCurrentLine = (lineIndex: number) => {
+  if (!subtitleContainer.value) return
+  const items = subtitleContainer.value.querySelectorAll('.demo-line')
+  if (items[lineIndex]) {
+    items[lineIndex].scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+
 const seekDemoAudio = (e: MouseEvent) => {
   if (!demoAudio.value) return
   const target = e.currentTarget as HTMLElement
   const rect = target.getBoundingClientRect()
   const percent = (e.clientX - rect.left) / rect.width
-  demoAudio.value.currentTime = percent * demoDuration.value
+  const time = percent * demoDuration.value
+  demoAudio.value.currentTime = time
+  demoCurrentLine.value = calculateCurrentLine(time)
 }
 
 // 新手引导
@@ -986,18 +1036,7 @@ onUnmounted(() => {
           <span class="demo-duration">7分06秒</span>
         </div>
         
-        <!-- 字幕显示 -->
-        <div class="demo-subtitle-box">
-          <div 
-            v-for="(line, idx) in demoScript" 
-            :key="idx"
-            :class="['demo-line', { active: idx === demoCurrentLine }]"
-          >
-            <span :class="['speaker-tag', line.speaker === '小北' ? 'female' : 'male']">{{ line.speaker }}</span>
-            <span class="line-content">{{ line.content }}</span>
-          </div>
-        </div>
-        
+        <!-- 音频控制 -->
         <div class="demo-controls">
           <button class="demo-play-btn" @click="toggleDemoAudio">
             {{ demoPlaying ? '⏸️' : '▶️' }}
@@ -1006,6 +1045,19 @@ onUnmounted(() => {
             <div class="demo-progress-fill" :style="{ width: demoProgress + '%' }"></div>
           </div>
           <span class="demo-time">{{ formatTime(demoCurrentTime) }} / {{ formatTime(demoDuration) }}</span>
+        </div>
+        
+        <!-- 字幕显示（在音频下方） -->
+        <div class="demo-subtitle-box" ref="subtitleContainer">
+          <div 
+            v-for="(line, idx) in demoScript" 
+            :key="idx"
+            :class="['demo-line', { active: idx === demoCurrentLine }]"
+            @click="jumpToLine(idx)"
+          >
+            <span :class="['speaker-tag', line.speaker === '小北' ? 'female' : 'male']">{{ line.speaker }}</span>
+            <span class="line-content">{{ line.content }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -2279,25 +2331,39 @@ onUnmounted(() => {
 
 /* Demo subtitle box */
 .demo-subtitle-box {
-  max-height: 120px;
+  max-height: 150px;
   overflow-y: auto;
-  margin: 12px 0;
-  padding: 12px;
+  margin-top: 12px;
+  padding: 8px;
   background: rgba(0, 20, 15, 0.6);
   border-radius: 8px;
 }
 
 .demo-line {
-  padding: 8px 10px;
-  margin-bottom: 4px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
   border-radius: 6px;
-  font-size: 13px;
-  line-height: 1.5;
-  transition: all 0.3s;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid transparent;
+}
+
+.demo-line:hover {
+  background: rgba(76, 175, 80, 0.1);
 }
 
 .demo-line.active {
-  background: rgba(76, 175, 80, 0.2);
+  background: rgba(76, 175, 80, 0.25);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.demo-loading {
+  text-align: center;
+  color: #81c784;
+  padding: 20px;
+  font-size: 13px;
 }
 
 .speaker-tag {
