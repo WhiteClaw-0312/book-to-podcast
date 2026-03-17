@@ -27,15 +27,11 @@ class VoiceResponse(BaseModel):
         from_attributes = True
 
 
-# edge-tts 支持的中文音色
+# edge-tts 支持的中文音色（已验证可用）
 EDGE_TTS_VOICES = [
     # 女声
     {"speaker_name": "晓晓", "voice_id": "zh-CN-XiaoxiaoNeural", "voice_name": "晓晓 - 活泼女声", "gender": "female", "description": "声音活泼自然，适合日常对话", "preview_text": "大家好，欢迎来到今天的节目！"},
     {"speaker_name": "晓伊", "voice_id": "zh-CN-XiaoyiNeural", "voice_name": "晓伊 - 温柔女声", "gender": "female", "description": "温柔甜美，适合讲故事", "preview_text": "今天我要给大家讲一个有趣的故事。"},
-    {"speaker_name": "晓涵", "voice_id": "zh-CN-XiaohanNeural", "voice_name": "晓涵 - 甜美女声", "gender": "female", "description": "声音甜美动听", "preview_text": "很高兴能和大家一起分享。"},
-    {"speaker_name": "晓梦", "voice_id": "zh-CN-XiaomengNeural", "voice_name": "晓梦 - 少女音", "gender": "female", "description": "青春活力的少女音", "preview_text": "哇，这也太棒了吧！"},
-    {"speaker_name": "晓萱", "voice_id": "zh-CN-XiaoxuanNeural", "voice_name": "晓萱 - 成熟女声", "gender": "female", "description": "知性优雅，适合正式场合", "preview_text": "让我们一起来探讨这个话题。"},
-    {"speaker_name": "晓睿", "voice_id": "zh-CN-XiaoruiNeural", "voice_name": "晓睿 - 知性女声", "gender": "female", "description": "沉稳知性，适合科普内容", "preview_text": "这个问题值得我们深入思考。"},
     
     # 男声
     {"speaker_name": "云希", "voice_id": "zh-CN-YunxiNeural", "voice_name": "云希 - 阳光男声", "gender": "male", "description": "阳光开朗，适合轻松对话", "preview_text": "没错，我也这么认为！"},
