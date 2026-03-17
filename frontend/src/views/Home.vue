@@ -68,7 +68,75 @@ const voiceMapping = ref<Record<string, string>>({
 })
 const selectedChapters = ref<number[]>([])
 
-// 检查后端状态
+// 示例音频播放器
+const demoAudio = ref<HTMLAudioElement | null>(null)
+const demoPlaying = ref(false)
+const demoProgress = ref(0)
+const demoCurrentTime = ref(0)
+const demoDuration = ref(426) // 7:06
+
+const toggleDemoAudio = () => {
+  if (!demoAudio.value) {
+    // 使用实际示例音频
+    demoAudio.value = new Audio('http://139.196.211.206/audio/demo_chapter_1.mp3')
+    demoAudio.value.onloadedmetadata = () => {
+      demoDuration.value = demoAudio.value?.duration || 458
+    }
+    demoAudio.value.ontimeupdate = () => {
+      if (demoAudio.value) {
+        demoCurrentTime.value = demoAudio.value.currentTime
+        demoProgress.value = (demoAudio.value.currentTime / demoDuration.value) * 100
+      }
+    }
+    demoAudio.value.onended = () => {
+      demoPlaying.value = false
+      demoProgress.value = 0
+      demoCurrentTime.value = 0
+    }
+  }
+  
+  if (demoPlaying.value) {
+    demoAudio.value.pause()
+    demoPlaying.value = false
+  } else {
+    demoAudio.value.play()
+    demoPlaying.value = true
+  }
+}
+
+const seekDemoAudio = (e: MouseEvent) => {
+  if (!demoAudio.value) return
+  const target = e.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  const percent = (e.clientX - rect.left) / rect.width
+  demoAudio.value.currentTime = percent * demoDuration.value
+}
+
+// 新手引导
+const showGuide = ref(false)
+const guideStep = ref(0)
+const guideDismissed = ref(false)
+
+const checkFirstVisit = () => {
+  const visited = localStorage.getItem('zhenbianshu_visited')
+  if (!visited && !user.value) {
+    showGuide.value = true
+    localStorage.setItem('zhenbianshu_visited', 'true')
+  }
+}
+
+const nextGuideStep = () => {
+  if (guideStep.value < 2) {
+    guideStep.value++
+  } else {
+    dismissGuide()
+  }
+}
+
+const dismissGuide = () => {
+  showGuide.value = false
+  guideDismissed.value = true
+}
 const checkBackend = async () => {
   try {
     const res = await apiFetch('/health')
@@ -544,6 +612,7 @@ onMounted(async () => {
   if (user.value) {
     await fetchQueue()
   }
+  checkFirstVisit()
   setInterval(checkBackend, 30000)
 })
 
@@ -551,6 +620,9 @@ onUnmounted(() => {
   stopPolling()
   if (previewAudio.value) {
     previewAudio.value.pause()
+  }
+  if (demoAudio.value) {
+    demoAudio.value.pause()
   }
 })
 </script>
@@ -809,52 +881,52 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 功能介绍 -->
-    <div class="card features-card">
-      <h2 class="card-title">✨ 功能特点</h2>
-      <div class="features-grid">
-        <div class="feature-item">
-          <div class="feature-icon">📄</div>
-          <h3>智能解析</h3>
-          <p>PDF/文本自动识别，提取章节</p>
+    <!-- 示例作品 -->
+    <div class="card demo-card">
+      <h2 class="card-title">🎧 听听效果</h2>
+      <p class="demo-subtitle">这是 AI 生成的播客示例，感受一下效果</p>
+      <div class="demo-player">
+        <div class="demo-info">
+          <span class="demo-book">📖 《无语问上帝》第一章</span>
+          <span class="demo-duration">7分06秒</span>
         </div>
-        <div class="feature-item">
-          <div class="feature-icon">🎙️</div>
-          <h3>AI播客</h3>
-          <p>双人对话，像听节目一样听书</p>
+        <div class="demo-controls">
+          <button class="demo-play-btn" @click="toggleDemoAudio">
+            {{ demoPlaying ? '⏸️' : '▶️' }}
+          </button>
+          <div class="demo-progress" @click="seekDemoAudio">
+            <div class="demo-progress-fill" :style="{ width: demoProgress + '%' }"></div>
+          </div>
+          <span class="demo-time">{{ formatTime(demoCurrentTime) }} / {{ formatTime(demoDuration) }}</span>
         </div>
-        <div class="feature-item">
-          <div class="feature-icon">🎭</div>
-          <h3>多音色</h3>
-          <p>多种音色可选，角色自由搭配</p>
-        </div>
-        <div class="feature-item">
-          <div class="feature-icon">✏️</div>
-          <h3>可编辑</h3>
-          <p>文稿可编辑，Prompt可自定义</p>
-        </div>
+        <p class="demo-desc">双人对话形式，像听播客节目一样听书</p>
       </div>
     </div>
 
-    <!-- 价格 -->
-    <div class="card pricing-card">
-      <h2 class="card-title">💎 价格方案</h2>
-      <div class="pricing-grid">
-        <div class="price-item">
-          <div class="price-amount">¥10</div>
-          <div class="price-count">100次</div>
-          <div class="price-unit">¥0.10/次</div>
+    <!-- 功能介绍 -->
+    <div class="card features-card">
+      <h2 class="card-title">✨ 为什么选择我们</h2>
+      <div class="features-simple">
+        <div class="feature-simple-item">
+          <span class="feature-simple-icon">🎙️</span>
+          <div class="feature-simple-content">
+            <h3>AI 双人播客</h3>
+            <p>自动生成主持人对话，像听节目一样听书</p>
+          </div>
         </div>
-        <div class="price-item featured">
-          <div class="price-badge">推荐</div>
-          <div class="price-amount">¥45</div>
-          <div class="price-count">500次</div>
-          <div class="price-unit">¥0.09/次</div>
+        <div class="feature-simple-item">
+          <span class="feature-simple-icon">⚡</span>
+          <div class="feature-simple-content">
+            <h3>一键生成</h3>
+            <p>上传 PDF/文本，自动识别章节并转换</p>
+          </div>
         </div>
-        <div class="price-item">
-          <div class="price-amount">¥80</div>
-          <div class="price-count">1000次</div>
-          <div class="price-unit">¥0.08/次</div>
+        <div class="feature-simple-item">
+          <span class="feature-simple-icon">🎭</span>
+          <div class="feature-simple-content">
+            <h3>多音色可选</h3>
+            <p>男女主持人多种音色，自由搭配</p>
+          </div>
         </div>
       </div>
     </div>
@@ -961,6 +1033,33 @@ onUnmounted(() => {
               🎙️ 开始生成 {{ selectedCount }} 章
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 新手引导 -->
+    <div v-if="showGuide && !guideDismissed" class="guide-overlay" @click.self="dismissGuide">
+      <div class="guide-content" :class="'guide-step-' + guideStep">
+        <div class="guide-arrow" v-if="guideStep === 0">👆</div>
+        <div class="guide-text">
+          <template v-if="guideStep === 0">
+            <h3>👋 欢迎来到枕边书</h3>
+            <p>上传一本 PDF 或文本文件，AI 将自动转换成播客</p>
+          </template>
+          <template v-else-if="guideStep === 1">
+            <h3>🎧 先听听效果</h3>
+            <p>下方有示例播客，点击播放感受一下</p>
+          </template>
+          <template v-else>
+            <h3>🎁 新用户福利</h3>
+            <p>注册即送 <strong>3次</strong> 免费体验额度</p>
+          </template>
+        </div>
+        <div class="guide-actions">
+          <button class="guide-skip" @click="dismissGuide">跳过</button>
+          <button class="guide-next" @click="nextGuideStep">
+            {{ guideStep < 2 ? '下一步' : '开始使用' }}
+          </button>
         </div>
       </div>
     </div>
@@ -1812,11 +1911,223 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-@media (max-width: 600px) {
-  .pricing-grid {
-    grid-template-columns: 1fr;
+/* Demo player */
+.demo-card {
+  margin-top: 20px;
+}
+
+.demo-subtitle {
+  color: #81c784;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.demo-player {
+  background: rgba(0, 30, 20, 0.4);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.demo-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.demo-book {
+  color: #e8f5e9;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.demo-duration {
+  color: #81c784;
+  font-size: 12px;
+}
+
+.demo-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.demo-play-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s;
+}
+
+.demo-play-btn:hover {
+  transform: scale(1.1);
+}
+
+.demo-progress {
+  flex: 1;
+  height: 6px;
+  background: rgba(76, 175, 80, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.demo-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4caf50, #81c784);
+  border-radius: 3px;
+  transition: width 0.1s;
+}
+
+.demo-time {
+  color: #81c784;
+  font-size: 12px;
+  min-width: 80px;
+}
+
+.demo-desc {
+  color: #666;
+  font-size: 12px;
+  margin: 12px 0 0 0;
+}
+
+/* Simplified features */
+.features-simple {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feature-simple-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+  background: rgba(0, 30, 20, 0.4);
+  border-radius: 12px;
+  transition: all 0.3s;
+}
+
+.feature-simple-item:hover {
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.feature-simple-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.feature-simple-content h3 {
+  color: #e8f5e9;
+  font-size: 15px;
+  margin: 0 0 4px 0;
+}
+
+.feature-simple-content p {
+  color: #81c784;
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Guide overlay */
+.guide-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.guide-content {
+  background: linear-gradient(135deg, #1a3a2a 0%, #0f2419 100%);
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 400px;
+  text-align: center;
+  animation: guideIn 0.3s ease;
+}
+
+@keyframes guideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
   }
-  
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.guide-arrow {
+  font-size: 40px;
+  margin-bottom: 16px;
+  animation: bounce 1s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.guide-text h3 {
+  color: #4caf50;
+  font-size: 22px;
+  margin: 0 0 12px 0;
+}
+
+.guide-text p {
+  color: #a5d6a7;
+  font-size: 15px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.guide-text strong {
+  color: #4caf50;
+}
+
+.guide-actions {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.guide-skip {
+  background: none;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: #81c784;
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.guide-next {
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  border: none;
+  color: white;
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 600px) {
   .header-card {
     flex-direction: column;
     align-items: flex-start;
@@ -1829,6 +2140,17 @@ onUnmounted(() => {
   
   .voice-options {
     grid-template-columns: 1fr;
+  }
+  
+  .demo-controls {
+    flex-wrap: wrap;
+  }
+  
+  .demo-time {
+    order: 3;
+    width: 100%;
+    text-align: center;
+    margin-top: 8px;
   }
 }
 </style>
