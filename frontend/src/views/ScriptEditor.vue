@@ -45,6 +45,45 @@ const fetchVoices = async () => {
 const femaleVoices = computed(() => voices.value.filter(v => v.gender === 'female'))
 const maleVoices = computed(() => voices.value.filter(v => v.gender === 'male'))
 
+// 音色预览
+const previewingVoice = ref<string | null>(null)
+const previewAudio = ref<HTMLAudioElement | null>(null)
+
+const previewVoice = async (voiceId: string) => {
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value = null
+  }
+  
+  previewingVoice.value = voiceId
+  
+  try {
+    const audioUrl = `http://139.196.211.206/api/voices/edge-id/${voiceId}/preview`
+    const audio = new Audio(audioUrl)
+    previewAudio.value = audio
+    
+    audio.onended = () => {
+      previewingVoice.value = null
+    }
+    
+    audio.onerror = () => {
+      previewingVoice.value = null
+    }
+    
+    await audio.play()
+  } catch (e) {
+    previewingVoice.value = null
+  }
+}
+
+const stopPreview = () => {
+  if (previewAudio.value) {
+    previewAudio.value.pause()
+    previewAudio.value = null
+  }
+  previewingVoice.value = null
+}
+
 // 获取数据
 const fetchData = async () => {
   const bookId = route.params.id
@@ -342,6 +381,12 @@ onMounted(() => {
               >
                 <div class="voice-header">
                   <div class="voice-name">{{ v.speaker_name }}</div>
+                  <button 
+                    class="preview-btn"
+                    @click.stop="previewingVoice === v.voice_id ? stopPreview() : previewVoice(v.voice_id)"
+                  >
+                    {{ previewingVoice === v.voice_id ? '⏹️' : '▶️' }}
+                  </button>
                 </div>
                 <div class="voice-desc">{{ v.description }}</div>
               </div>
@@ -360,6 +405,12 @@ onMounted(() => {
               >
                 <div class="voice-header">
                   <div class="voice-name">{{ v.speaker_name }}</div>
+                  <button 
+                    class="preview-btn"
+                    @click.stop="previewingVoice === v.voice_id ? stopPreview() : previewVoice(v.voice_id)"
+                  >
+                    {{ previewingVoice === v.voice_id ? '⏹️' : '▶️' }}
+                  </button>
                 </div>
                 <div class="voice-desc">{{ v.description }}</div>
               </div>
@@ -704,6 +755,19 @@ onMounted(() => {
   color: #e8f5e9;
   font-size: 13px;
   font-weight: 500;
+}
+
+.preview-btn {
+  background: rgba(33, 150, 243, 0.2);
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
 }
 
 .voice-desc {

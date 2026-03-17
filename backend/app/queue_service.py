@@ -209,7 +209,8 @@ class QueueService:
             
             duration = await self.tts_service.synthesize_chapter(
                 script.get("dialogues", []),
-                audio_path
+                audio_path,
+                voice_mapping=voice_mapping
             )
             
             self.update_task(db, task_id, progress=90, message="正在保存音频...")

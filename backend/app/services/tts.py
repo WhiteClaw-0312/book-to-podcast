@@ -9,26 +9,26 @@ import edge_tts
 class TTSService:
     """TTS 服务 - 使用 edge-tts（完全免费）"""
     
-    # 音色配置
-    VOICES = {
+    # 默认音色配置
+    DEFAULT_VOICES = {
         "小北": "zh-CN-XiaoxiaoNeural",      # 活泼女声
-        "阿南": "zh-CN-YunxiNeural",         # 沉稳男声
-        # 备选音色
-        "小北_活泼": "zh-CN-XiaoyiNeural",
-        "阿南_深沉": "zh-CN-YunjianNeural",
+        "阿南": "zh-CN-YunxiNeural",         # 阳光男声
     }
     
     async def synthesize(
         self,
         speaker: str,
         text: str,
-        output_path: str
+        output_path: str,
+        voice_mapping: Dict[str, str] = None
     ) -> float:
         """
         合成单段语音
         返回音频时长（秒）
         """
-        voice = self.VOICES.get(speaker, "zh-CN-XiaoxiaoNeural")
+        # 使用传入的 voice_mapping 或默认配置
+        voices = voice_mapping or self.DEFAULT_VOICES
+        voice = voices.get(speaker, self.DEFAULT_VOICES.get(speaker, "zh-CN-XiaoxiaoNeural"))
         
         try:
             communicate = edge_tts.Communicate(text, voice)
@@ -46,6 +46,7 @@ class TTSService:
         self,
         dialogues: List[Dict],
         output_path: str,
+        voice_mapping: Dict[str, str] = None,
         progress_callback=None
     ) -> float:
         """
@@ -68,7 +69,7 @@ class TTSService:
             
             temp_path = str(temp_dir / f"temp_{i:04d}.mp3")
             
-            duration = await self.synthesize(speaker, content, temp_path)
+            duration = await self.synthesize(speaker, content, temp_path, voice_mapping)
             
             if duration > 0:
                 temp_files.append(temp_path)
