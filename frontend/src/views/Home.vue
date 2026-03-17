@@ -610,6 +610,15 @@ const openVoiceSelector = () => {
   showVoiceSelector.value = true
 }
 
+// 生成单个章节音频
+const pendingChapterNum = ref<number | null>(null)
+
+const generateSingleChapterAudio = (bookId: string, chapterNum: number) => {
+  selectedChapters.value = [chapterNum]
+  pendingChapterNum.value = chapterNum
+  showVoiceSelector.value = true
+}
+
 // 确认生成音频
 const confirmGenerateAudio = async () => {
   if (!selectedChapters.value.length || !selectedBookId.value) return
@@ -984,7 +993,7 @@ onUnmounted(() => {
             
             <!-- 文稿就绪，可以查看文稿或生成音频 -->
             <div v-else-if="book.status === 'script_ready' || book.status === 'partial'" class="action-section">
-              <p class="action-hint">文稿已就绪，可以查看编辑或生成音频</p>
+              <p class="action-hint">文稿已就绪，查看或生成音频</p>
               <div class="chapter-list-detail">
                 <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row">
                   <div class="chapter-info">
@@ -997,21 +1006,10 @@ onUnmounted(() => {
                       <span class="has-audio">✅ {{ formatTime(ch.duration) }}</span>
                     </template>
                     <template v-else>
-                      <label class="checkbox-label" @click.stop>
-                        <input 
-                          type="checkbox" 
-                          :checked="selectedChapters.includes(ch.number)"
-                          @change="toggleChapter(ch.number)"
-                        />
-                        <span class="check-text">生成</span>
-                      </label>
+                      <button class="btn-small primary" @click="generateSingleChapterAudio(book.id, ch.number)">🎙️ 生成</button>
                     </template>
                   </div>
                 </div>
-              </div>
-              <div v-if="selectedCount > 0" class="generate-action">
-                <span class="cost-hint">需要 {{ selectedCount }} 次额度</span>
-                <button class="btn btn-primary" @click="openVoiceSelector">🎙️ 生成音频</button>
               </div>
             </div>
             
