@@ -712,7 +712,51 @@ const audioPlayerRef = ref<HTMLAudioElement | null>(null)
 const playerCurrentTime = ref(0)
 const playerDuration = ref(0)
 const playerScript = ref<any[]>([])
+const playerScriptWithTime = ref<any[]>([]) // 带时间戳的字幕
 const playerCurrentLine = ref(0)
+
+// 计算带时间戳的字幕
+const calculateScriptTimestamps = (dialogues: any[], totalDuration: number) => {
+  if (!dialogues.length) return []
+  
+  // 计算总字符数
+  const totalChars = dialogues.reduce((sum, d) => sum + (d.content?.length || 0), 0)
+  if (totalChars === 0) return dialogues.map((d, i) => ({ ...d, start: 0, end: totalDuration }))
+  
+  // 根据字符数分配时间
+  let currentTime = 0
+  return dialogues.map(d => {
+    const charRatio = (d.content?.length || 0) / totalChars
+    const duration = charRatio * totalDuration
+    const result = {
+      ...d,
+      start: currentTime,
+      end: currentTime + duration
+    }
+    currentTime += duration
+    return result
+  })
+}
+
+// 根据时间查找当前字幕行
+const findCurrentLine = (time: number) => {
+  if (!playerScriptWithTime.value.length) return -1
+  for (let i = 0; i < playerScriptWithTime.value.length; i++) {
+    const line = playerScriptWithTime.value[i]
+    if (time >= line.start && time < line.end) {
+      return i
+    }
+  }
+  return playerScriptWithTime.value.length - 1
+}
+
+// 根据字幕行获取开始时间
+const getTimeForPlayerLine = (lineIndex: number) => {
+  if (lineIndex >= 0 && lineIndex < playerScriptWithTime.value.length) {
+    return playerScriptWithTime.value[lineIndex].start
+  }
+  return 0
+}
 
 const playChapterAudio = async (bookId: string, chapter: any) => {
   playingChapter.value = chapter
@@ -724,9 +768,12 @@ const playChapterAudio = async (bookId: string, chapter: any) => {
     if (res.ok) {
       const data = await res.json()
       playerScript.value = data.dialogues || []
+      // 先用预估时长初始化，音频加载后会更新
+      playerScriptWithTime.value = calculateScriptTimestamps(playerScript.value, chapter.duration || 180)
     }
   } catch (e) {
     playerScript.value = []
+    playerScriptWithTime.value = []
   }
 }
 
@@ -737,17 +784,38 @@ const closeAudioPlayer = () => {
   showAudioPlayer.value = false
   playingChapter.value = null
   playerScript.value = []
+  playerScriptWithTime.value = []
   playerCurrentLine.value = 0
 }
 
 const onPlayerTimeUpdate = () => {
-  if (!audioPlayerRef.value || !playerScript.value.length) return
+  if (!audioPlayerRef.value || !playerScriptWithTime.value.length) return
   playerCurrentTime.value = audioPlayerRef.value.currentTime
-  const lineDuration = playerDuration.value / playerScript.value.length
-  playerCurrentLine.value = Math.min(
-    Math.floor(audioPlayerRef.value.currentTime / lineDuration),
-    playerScript.value.length - 1
-  )
+  
+  // 使用精确时间匹配
+  const newLine = findCurrentLine(audioPlayerRef.value.currentTime)
+  if (newLine !== playerCurrentLine.value) {
+    playerCurrentLine.value = newLine
+    scrollToPlayerLine(newLine)
+  }
+}
+
+// 滚动到当前字幕
+const playerScriptContainer = ref<HTMLElement | null>(null)
+const scrollToPlayerLine = (lineIndex: number) => {
+  if (!playerScriptContainer.value) return
+  const items = playerScriptContainer.value.querySelectorAll('.script-line')
+  if (items[lineIndex]) {
+    items[lineIndex].scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+
+// 点击字幕跳转
+const jumpToPlayerLine = (lineIndex: number) => {
+  if (!audioPlayerRef.value) return
+  const time = getTimeForPlayerLine(lineIndex)
+  audioPlayerRef.value.currentTime = time
+  playerCurrentLine.value = lineIndex
 }
 
 const seekPlayer = (e: MouseEvent) => {
@@ -756,6 +824,15 @@ const seekPlayer = (e: MouseEvent) => {
   const rect = target.getBoundingClientRect()
   const percent = (e.clientX - rect.left) / rect.width
   audioPlayerRef.value.currentTime = percent * playerDuration.value
+}
+
+// 音频加载完成时更新时间戳
+const onAudioLoaded = () => {
+  if (audioPlayerRef.value) {
+    playerDuration.value = audioPlayerRef.value.duration
+    // 根据实际音频时长重新计算时间戳
+    playerScriptWithTime.value = calculateScriptTimestamps(playerScript.value, playerDuration.value)
+  }
 }
 
 // 刷新书籍状态
@@ -1280,11 +1357,12 @@ onUnmounted(() => {
         
         <div class="player-body">
           <!-- 字幕区域 -->
-          <div class="player-script" v-if="playerScript.length > 0">
+          <div class="player-script" v-if="playerScriptWithTime.length > 0" ref="playerScriptContainer">
             <div 
-              v-for="(line, idx) in playerScript" 
+              v-for="(line, idx) in playerScriptWithTime" 
               :key="idx"
               :class="['script-line', { active: idx === playerCurrentLine }]"
+              @click="jumpToPlayerLine(idx)"
             >
               <span :class="['speaker-tag', line.speaker === '小北' ? 'female' : 'male']">{{ line.speaker }}</span>
               <span class="script-content">{{ line.content }}</span>
@@ -1296,7 +1374,7 @@ onUnmounted(() => {
             <audio 
               ref="audioPlayerRef"
               :src="`/api/books/${selectedBookId}/chapters/${playingChapter?.number}/audio`"
-              @loadedmetadata="playerDuration = audioPlayerRef?.duration || 0"
+              @loadedmetadata="onAudioLoaded"
               @timeupdate="onPlayerTimeUpdate"
               @ended="closeAudioPlayer"
               autoplay
@@ -2478,12 +2556,18 @@ onUnmounted(() => {
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.5;
-  transition: all 0.3s;
+  transition: all 0.2s;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.script-line:hover {
+  background: rgba(76, 175, 80, 0.1);
 }
 
 .script-line.active {
-  background: rgba(76, 175, 80, 0.2);
-  transform: translateX(4px);
+  background: rgba(76, 175, 80, 0.25);
+  border-color: rgba(76, 175, 80, 0.3);
 }
 
 .script-content {
