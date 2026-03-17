@@ -825,3 +825,52 @@ async def update_script(
     db.commit()
     
     return {"message": "文稿已保存"}
+
+
+@router.delete("/{book_id}")
+async def delete_book(
+    book_id: str, 
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """删除书籍及其相关数据"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    # 验证用户权限
+    if book.api_key != user.api_key:
+        raise HTTPException(403, "无权删除此书籍")
+    
+    # 删除章节关联的文件
+    chapters = db.query(Chapter).filter(Chapter.book_id == book_id).all()
+    for ch in chapters:
+        # 删除音频文件
+        if ch.audio_path and Path(ch.audio_path).exists():
+            try:
+                Path(ch.audio_path).unlink()
+            except:
+                pass
+    
+    # 删除章节记录
+    db.query(Chapter).filter(Chapter.book_id == book_id).delete()
+    
+    # 删除任务队列
+    db.query(TaskQueue).filter(TaskQueue.book_id == book_id).delete()
+    
+    # 删除原文件
+    if book.file_path and Path(book.file_path).exists():
+        try:
+            Path(book.file_path).unlink()
+        except:
+            pass
+    
+    # 删除书籍记录
+    db.delete(book)
+    db.commit()
+    
+    return {"message": "书籍已删除"}

@@ -21,6 +21,35 @@ const uploadProgress = ref('')
 const queueBooks = ref<any[]>([])
 const loadingQueue = ref(false)
 
+// 分页
+const pageSize = 3
+const currentPage = ref(1)
+const totalPages = computed(() => Math.ceil(queueBooks.value.length / pageSize))
+const paginatedBooks = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return queueBooks.value.slice(start, start + pageSize)
+})
+
+const goToPage = (page: number) => {
+  currentPage.value = page
+  // 切换页面时关闭展开的详情
+  selectedBookId.value = null
+  selectedBook.value = null
+  stopPolling()
+}
+
+const prevPage = () => {
+  if (currentPage.value > 1) {
+    goToPage(currentPage.value - 1)
+  }
+}
+
+const nextPage = () => {
+  if (currentPage.value < totalPages.value) {
+    goToPage(currentPage.value + 1)
+  }
+}
+
 // 当前选中查看的书籍
 const selectedBookId = ref<string | null>(null)
 const selectedBook = ref<any>(null)
@@ -155,8 +184,9 @@ const upload = async () => {
     uploadProgress.value = '上传成功，正在识别...'
     file.value = null
     
-    // 刷新队列
+    // 刷新队列并跳转到第一页
     await fetchQueue()
+    currentPage.value = 1
     
     // 自动选中刚上传的书籍
     selectedBookId.value = data.id
@@ -444,16 +474,29 @@ const deleteBook = async (bookId: string) => {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     })
+    
     if (res.ok) {
+      // 从列表中移除
       queueBooks.value = queueBooks.value.filter(b => b.id !== bookId)
+      
+      // 关闭展开的详情
       if (selectedBookId.value === bookId) {
         selectedBookId.value = null
         selectedBook.value = null
         stopPolling()
       }
+      
+      // 调整页码
+      const newTotalPages = Math.ceil(queueBooks.value.length / pageSize)
+      if (currentPage.value > newTotalPages && newTotalPages > 0) {
+        currentPage.value = newTotalPages
+      }
+    } else {
+      const err = await res.json()
+      alert('删除失败: ' + (err.detail || '未知错误'))
     }
-  } catch (e) {
-    console.error(e)
+  } catch (e: any) {
+    alert('删除失败: ' + e.message)
   }
 }
 
@@ -641,7 +684,7 @@ onUnmounted(() => {
       <div v-else class="queue-list">
         <!-- 书籍列表 -->
         <div 
-          v-for="book in queueBooks" 
+          v-for="book in paginatedBooks" 
           :key="book.id" 
           :class="['queue-item', { expanded: selectedBookId === book.id }]"
         >
@@ -785,6 +828,20 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+        </div>
+        
+        <!-- 分页 -->
+        <div v-if="totalPages > 1" class="pagination">
+          <button class="page-btn" @click="prevPage" :disabled="currentPage === 1">‹</button>
+          <button 
+            v-for="p in totalPages" 
+            :key="p" 
+            :class="['page-btn', { active: p === currentPage }]"
+            @click="goToPage(p)"
+          >
+            {{ p }}
+          </button>
+          <button class="page-btn" @click="nextPage" :disabled="currentPage === totalPages">›</button>
         </div>
       </div>
     </div>
@@ -1648,6 +1705,47 @@ onUnmounted(() => {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+/* 分页 */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.page-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 30, 20, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 6px;
+  color: #81c784;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.2);
+}
+
+.page-btn.active {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.3);
+  color: #a5d6a7;
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 @media (max-width: 600px) {
