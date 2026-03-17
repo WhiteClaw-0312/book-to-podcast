@@ -16,6 +16,8 @@ const showCertHint = ref(false)
 const file = ref<File | null>(null)
 const uploading = ref(false)
 const uploadProgress = ref('')
+const showUploadSuccess = ref(false)
+const uploadedBookTitle = ref('')
 
 // 生成队列
 const queueBooks = ref<any[]>([])
@@ -181,12 +183,19 @@ const upload = async () => {
     }
     
     const data = await res.json()
-    uploadProgress.value = '上传成功，正在识别...'
+    uploadedBookTitle.value = data.title || file.value?.name || '书籍'
+    uploadProgress.value = ''
     file.value = null
     
     // 刷新队列并跳转到第一页
     await fetchQueue()
     currentPage.value = 1
+    
+    // 显示成功提示
+    showUploadSuccess.value = true
+    setTimeout(() => {
+      showUploadSuccess.value = false
+    }, 3000)
     
     // 自动选中刚上传的书籍
     selectedBookId.value = data.id
@@ -610,67 +619,21 @@ onUnmounted(() => {
       </p>
     </div>
 
-    <!-- 功能介绍 -->
-    <div class="card features-card">
-      <h2 class="card-title">✨ 功能特点</h2>
-      <div class="features-grid">
-        <div class="feature-item">
-          <div class="feature-icon">📄</div>
-          <h3>智能解析</h3>
-          <p>PDF/文本自动识别，提取章节</p>
-        </div>
-        <div class="feature-item">
-          <div class="feature-icon">🎙️</div>
-          <h3>AI播客</h3>
-          <p>双人对话，像听节目一样听书</p>
-        </div>
-        <div class="feature-item">
-          <div class="feature-icon">🎭</div>
-          <h3>多音色</h3>
-          <p>多种音色可选，角色自由搭配</p>
-        </div>
-        <div class="feature-item">
-          <div class="feature-icon">✏️</div>
-          <h3>可编辑</h3>
-          <p>文稿可编辑，Prompt可自定义</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- 价格 -->
-    <div class="card pricing-card">
-      <h2 class="card-title">💎 价格方案</h2>
-      <div class="pricing-grid">
-        <div class="price-item">
-          <div class="price-amount">¥10</div>
-          <div class="price-count">100次</div>
-          <div class="price-unit">¥0.10/次</div>
-        </div>
-        <div class="price-item featured">
-          <div class="price-badge">推荐</div>
-          <div class="price-amount">¥45</div>
-          <div class="price-count">500次</div>
-          <div class="price-unit">¥0.09/次</div>
-        </div>
-        <div class="price-item">
-          <div class="price-amount">¥80</div>
-          <div class="price-count">1000次</div>
-          <div class="price-unit">¥0.08/次</div>
-        </div>
-      </div>
-    </div>
-
     <!-- 生成队列 -->
     <div class="card queue-card" v-if="user">
-      <h2 class="card-title">📋 生成队列</h2>
+      <div class="queue-header">
+        <h2 class="card-title">📋 生成队列</h2>
+        <span class="queue-count" v-if="queueBooks.length > 0">共 {{ queueBooks.length }} 个任务</span>
+      </div>
       
-      <!-- 未登录提示 -->
-      <div v-if="!user" class="queue-empty">
-        <p>请先登录查看生成队列</p>
+      <!-- 上传成功提示 -->
+      <div v-if="showUploadSuccess" class="upload-success-toast">
+        <span class="toast-icon">✅</span>
+        <span class="toast-text">《{{ uploadedBookTitle }}》已加入生成队列</span>
       </div>
       
       <!-- 加载中 -->
-      <div v-else-if="loadingQueue" class="queue-loading">
+      <div v-if="loadingQueue" class="queue-loading">
         <span>加载中...</span>
       </div>
       
@@ -842,6 +805,56 @@ onUnmounted(() => {
             {{ p }}
           </button>
           <button class="page-btn" @click="nextPage" :disabled="currentPage === totalPages">›</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 功能介绍 -->
+    <div class="card features-card">
+      <h2 class="card-title">✨ 功能特点</h2>
+      <div class="features-grid">
+        <div class="feature-item">
+          <div class="feature-icon">📄</div>
+          <h3>智能解析</h3>
+          <p>PDF/文本自动识别，提取章节</p>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon">🎙️</div>
+          <h3>AI播客</h3>
+          <p>双人对话，像听节目一样听书</p>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon">🎭</div>
+          <h3>多音色</h3>
+          <p>多种音色可选，角色自由搭配</p>
+        </div>
+        <div class="feature-item">
+          <div class="feature-icon">✏️</div>
+          <h3>可编辑</h3>
+          <p>文稿可编辑，Prompt可自定义</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 价格 -->
+    <div class="card pricing-card">
+      <h2 class="card-title">💎 价格方案</h2>
+      <div class="pricing-grid">
+        <div class="price-item">
+          <div class="price-amount">¥10</div>
+          <div class="price-count">100次</div>
+          <div class="price-unit">¥0.10/次</div>
+        </div>
+        <div class="price-item featured">
+          <div class="price-badge">推荐</div>
+          <div class="price-amount">¥45</div>
+          <div class="price-count">500次</div>
+          <div class="price-unit">¥0.09/次</div>
+        </div>
+        <div class="price-item">
+          <div class="price-amount">¥80</div>
+          <div class="price-count">1000次</div>
+          <div class="price-unit">¥0.08/次</div>
         </div>
       </div>
     </div>
@@ -1201,6 +1214,57 @@ onUnmounted(() => {
 /* Queue */
 .queue-card {
   margin-top: 20px;
+}
+
+.queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.queue-header .card-title {
+  margin-bottom: 0;
+}
+
+.queue-count {
+  font-size: 12px;
+  color: #81c784;
+  background: rgba(76, 175, 80, 0.1);
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.upload-success-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.2), rgba(46, 125, 50, 0.1));
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-icon {
+  font-size: 18px;
+}
+
+.toast-text {
+  color: #a5d6a7;
+  font-size: 14px;
 }
 
 .queue-loading, .queue-empty {
