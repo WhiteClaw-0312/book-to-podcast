@@ -595,6 +595,13 @@ const generateScripts = async () => {
     
     if (res.ok) {
       selectedChapters.value = []
+      // 立即更新书籍状态为生成中
+      if (selectedBook.value) {
+        selectedBook.value.status = 'generating_script'
+      }
+      // 立即刷新队列显示
+      await fetchQueue()
+      // 开始轮询进度
       startPolling()
     } else {
       const err = await res.json()
@@ -638,6 +645,14 @@ const confirmGenerateAudio = async () => {
     
     if (res.ok) {
       selectedChapters.value = []
+      pendingChapterNum.value = null
+      // 立即更新书籍状态为生成中
+      if (selectedBook.value) {
+        selectedBook.value.status = 'generating_audio'
+      }
+      // 立即刷新队列显示
+      await fetchQueue()
+      // 开始轮询进度
       startPolling()
     } else {
       const err = await res.json()
