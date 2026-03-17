@@ -475,13 +475,14 @@ const fetchProgress = async () => {
     queueProgress.value = data.queue
     tasks.value = data.tasks || []
     
-    // 更新书籍状态
-    await fetchBookDetail()
-    await fetchQueue()
-    
-    // 如果完成，停止轮询
+    // 只在任务完成时更新书籍详情和队列
     if (data.queue?.status === 'completed' || data.book_status === 'script_ready' || data.book_status === 'completed') {
       stopPolling()
+      // 延迟刷新，让用户看到完成状态
+      setTimeout(async () => {
+        await fetchBookDetail()
+        await fetchQueue()
+      }, 500)
     }
   } catch (e) {
     console.error('获取进度失败', e)
@@ -493,7 +494,7 @@ const startPolling = () => {
   if (pollingTimer.value) {
     clearInterval(pollingTimer.value)
   }
-  pollingTimer.value = setInterval(fetchProgress, 2000)
+  pollingTimer.value = setInterval(fetchProgress, 3000) // 改为3秒
 }
 
 // 停止轮询
@@ -981,25 +982,30 @@ onUnmounted(() => {
               </button>
             </div>
             
-            <!-- 文稿就绪，可以生成音频 -->
+            <!-- 文稿就绪，可以查看文稿或生成音频 -->
             <div v-else-if="book.status === 'script_ready' || book.status === 'partial'" class="action-section">
-              <p class="action-hint">选择章节生成音频（需要扣费）</p>
+              <p class="action-hint">文稿已就绪，可以查看编辑或生成音频</p>
               <div class="chapter-list-detail">
                 <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row">
                   <div class="chapter-info">
                     <span class="chapter-num">第{{ ch.number }}章</span>
                     <span class="chapter-title">{{ ch.title }}</span>
                   </div>
-                  <div class="chapter-status">
-                    <span v-if="ch.has_audio" class="has-audio">✅ 音频 {{ formatTime(ch.duration) }}</span>
-                    <label v-else class="checkbox-label" @click.stop>
-                      <input 
-                        type="checkbox" 
-                        :checked="selectedChapters.includes(ch.number)"
-                        @change="toggleChapter(ch.number)"
-                      />
-                      生成音频
-                    </label>
+                  <div class="chapter-actions-row">
+                    <button class="btn-small" @click="viewScript(book.id, ch.number)">📝 查看</button>
+                    <template v-if="ch.has_audio">
+                      <span class="has-audio">✅ {{ formatTime(ch.duration) }}</span>
+                    </template>
+                    <template v-else>
+                      <label class="checkbox-label" @click.stop>
+                        <input 
+                          type="checkbox" 
+                          :checked="selectedChapters.includes(ch.number)"
+                          @change="toggleChapter(ch.number)"
+                        />
+                        <span class="check-text">生成</span>
+                      </label>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -2421,6 +2427,13 @@ onUnmounted(() => {
 .chapter-actions-row {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.check-text {
+  font-size: 12px;
+  color: #81c784;
+  margin-left: 4px;
 }
 
 .btn-small.primary {
