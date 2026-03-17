@@ -104,6 +104,37 @@ class QueueService:
             "status": status
         }
     
+    def update_book_status(self, db: Session, book_id: str):
+        """检查并更新书籍状态"""
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if not book:
+            return
+        
+        chapters = db.query(Chapter).filter(Chapter.book_id == book_id).all()
+        if not chapters:
+            return
+        
+        all_have_script = all(c.script for c in chapters)
+        all_have_audio = all(c.audio_path for c in chapters)
+        some_have_audio = any(c.audio_path for c in chapters)
+        
+        # 确定新状态
+        new_status = book.status
+        
+        if all_have_audio:
+            new_status = "completed"
+        elif some_have_audio and all_have_script:
+            new_status = "partial"
+        elif all_have_script:
+            new_status = "script_ready"
+        elif book.status in ["script_ready", "completed", "partial"]:
+            # 状态已经是最终状态，不回退
+            pass
+        
+        if new_status != book.status:
+            book.status = new_status
+            db.commit()
+    
     async def process_script_task(self, task_id: str, book_id: str, chapter_number: int):
         """处理文稿生成任务"""
         db = SessionLocal()
@@ -137,6 +168,9 @@ class QueueService:
             chapter.script = json.dumps(script, ensure_ascii=False)
             chapter.status = "script_ready"
             db.commit()
+            
+            # 更新书籍状态
+            self.update_book_status(db, book_id)
             
             self.update_task(db, task_id, status="completed", progress=100, message="文稿生成完成", result=json.dumps({"chapter": chapter_number}))
             
@@ -185,6 +219,9 @@ class QueueService:
             chapter.duration = duration
             chapter.status = "completed"
             db.commit()
+            
+            # 更新书籍状态
+            self.update_book_status(db, book_id)
             
             self.update_task(db, task_id, status="completed", progress=100, message="音频生成完成", result=json.dumps({"chapter": chapter_number, "duration": duration}))
             
