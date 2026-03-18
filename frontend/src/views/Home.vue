@@ -579,6 +579,11 @@ const deselectAllChapters = () => {
   selectedChapters.value = []
 }
 
+// 查看 OCR 解析结果
+const viewOcrResult = (bookId: string) => {
+  router.push(`/book/${bookId}/chapters`)
+}
+
 // 生成文稿
 const generateScripts = async () => {
   if (!selectedChapters.value.length || !selectedBookId.value) return
@@ -1059,7 +1064,20 @@ onUnmounted(() => {
             
             <!-- OCR完成，可以选择生成文稿 -->
             <div v-else-if="book.status === 'ready'" class="action-section">
-              <p class="action-hint">选择章节生成文稿（免费）</p>
+              <!-- OCR 结果预览入口 -->
+              <div class="ocr-result-card" @click="viewOcrResult(book.id)">
+                <div class="ocr-result-icon">📄</div>
+                <div class="ocr-result-content">
+                  <h4>查看解析结果</h4>
+                  <p>共 {{ book.total_chapters }} 章 · 点击查看每章内容</p>
+                </div>
+                <div class="ocr-result-arrow">→</div>
+              </div>
+              
+              <div class="divider-line">
+                <span>确认无误后，选择章节生成文稿</span>
+              </div>
+              
               <div class="chapter-select">
                 <button class="btn-small" @click="selectAllChapters">全选</button>
                 <button class="btn-small" @click="deselectAllChapters">全不选</button>
@@ -1862,6 +1880,69 @@ onUnmounted(() => {
 .task-status.processing { color: #64b5f6; }
 .task-status.completed { color: #81c784; }
 .task-status.failed { color: #ef5350; }
+
+/* OCR 结果预览卡片 */
+.ocr-result-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(46, 125, 50, 0.1) 100%);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 12px;
+}
+
+.ocr-result-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.2);
+  border-color: #4caf50;
+}
+
+.ocr-result-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.ocr-result-content {
+  flex: 1;
+}
+
+.ocr-result-content h4 {
+  color: #e8f5e9;
+  font-size: 14px;
+  margin: 0 0 2px 0;
+}
+
+.ocr-result-content p {
+  color: #81c784;
+  font-size: 12px;
+  margin: 0;
+}
+
+.ocr-result-arrow {
+  font-size: 18px;
+  color: #4caf50;
+}
+
+.divider-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  color: #666;
+  font-size: 12px;
+}
+
+.divider-line::before,
+.divider-line::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(76, 175, 80, 0.2);
+}
 
 /* Action section */
 .action-section {
