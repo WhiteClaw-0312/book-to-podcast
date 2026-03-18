@@ -525,8 +525,28 @@ onUnmounted(() => {
 
       <!-- 章节选择（OCR完成，尚未生成文稿） -->
       <div class="card" v-else-if="book?.status === 'ready'">
-        <h2 class="card-title">📖 选择章节生成文稿</h2>
-        <p class="card-hint">第一步：生成文稿后可以编辑，确认后再生成音频</p>
+        <div class="card-header-row">
+          <div>
+            <h2 class="card-title">📖 OCR 解析完成</h2>
+            <p class="card-hint">共识别 {{ book.total_chapters }} 个章节，请确认内容后生成文稿</p>
+          </div>
+        </div>
+        
+        <!-- OCR 结果预览入口 -->
+        <div class="ocr-preview-section">
+          <div class="ocr-info-card" @click="router.push(`/book/${route.params.id}/chapters`)">
+            <div class="ocr-info-icon">📄</div>
+            <div class="ocr-info-content">
+              <h3>查看解析结果</h3>
+              <p>点击查看每章内容、编辑章节标题、或重新分章</p>
+            </div>
+            <div class="ocr-info-arrow">→</div>
+          </div>
+        </div>
+        
+        <div class="divider">
+          <span>确认无误后，选择章节生成文稿</span>
+        </div>
         
         <div class="select-actions">
           <button class="btn btn-secondary" @click="selectAll">全选</button>
@@ -543,7 +563,8 @@ onUnmounted(() => {
               ? selectedChapters = selectedChapters.filter(n => n !== ch.number)
               : selectedChapters.push(ch.number)"
           >
-            第{{ ch.number }}章
+            <div class="chapter-item-num">第{{ ch.number }}章</div>
+            <div class="chapter-item-title">{{ ch.title }}</div>
           </div>
         </div>
         
@@ -1506,5 +1527,122 @@ onUnmounted(() => {
   color: #666;
   font-size: 12px;
   margin-top: 16px;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.card-header-row .card-title {
+  margin-bottom: 4px;
+}
+
+.card-header-row .card-hint {
+  margin-bottom: 0;
+}
+
+/* OCR 结果预览入口 */
+.ocr-preview-section {
+  margin-bottom: 24px;
+}
+
+.ocr-info-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(46, 125, 50, 0.1) 100%);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.ocr-info-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(76, 175, 80, 0.2);
+  border-color: #4caf50;
+}
+
+.ocr-info-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.ocr-info-content {
+  flex: 1;
+}
+
+.ocr-info-content h3 {
+  color: #e8f5e9;
+  font-size: 16px;
+  margin: 0 0 4px 0;
+}
+
+.ocr-info-content p {
+  color: #81c784;
+  font-size: 13px;
+  margin: 0;
+}
+
+.ocr-info-arrow {
+  font-size: 20px;
+  color: #4caf50;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  color: #666;
+  font-size: 13px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(76, 175, 80, 0.2);
+}
+
+/* 章节网格优化 */
+.chapter-item {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  background: rgba(0, 30, 20, 0.5);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.chapter-item:hover {
+  border-color: #4caf50;
+}
+
+.chapter-item.selected {
+  border-color: #4caf50;
+  background: rgba(76, 175, 80, 0.15);
+}
+
+.chapter-item-num {
+  font-size: 12px;
+  color: #81c784;
+  margin-bottom: 4px;
+}
+
+.chapter-item-title {
+  font-size: 13px;
+  color: #e8f5e9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

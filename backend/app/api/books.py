@@ -133,10 +133,16 @@ async def process_book(book_id: str):
         book.status = "ocr"
         db.commit()
         
-        text, used_ocr = await ocr_service.extract_text(book.file_path)
+        # 使用新的 extract_text 方法（返回页面列表）
+        text, used_ocr, pages = await ocr_service.extract_text(book.file_path)
         
-        # 提取章节
-        chapters_data = ocr_service.extract_chapters(text)
+        # 保存页面数据到书籍记录（用于后续重新分章和前端展示）
+        # 每页保存前5000字符，足够覆盖大部分内容
+        book.raw_text = text[:100000]  # 保存前100000字符
+        book.pages_json = json.dumps([p[:5000] for p in pages], ensure_ascii=False)
+        
+        # 智能章节提取
+        chapters_data = await ocr_service.extract_chapters_smart(text, pages)
         
         book.total_chapters = len(chapters_data)
         book.status = "ready"
@@ -144,18 +150,28 @@ async def process_book(book_id: str):
         
         # 保存章节
         for ch in chapters_data:
+            # 内容限制放宽到 15000 字符（约 5000 字）
+            content = ch.get("content", "")
+            if len(content) > 15000:
+                content = content[:15000] + "\n\n... (内容已截断)"
+            
             chapter = Chapter(
                 book_id=book_id,
                 number=ch["number"],
-                title=ch["title"],
-                content=ch["content"][:8000],  # 限制长度
+                title=ch["title"][:100],  # 标题限制100字符
+                content=content,
+                page_range=ch.get("page_range", ""),
                 status="pending"
             )
             db.add(chapter)
         
         db.commit()
         
+        print(f"✅ 书籍处理完成: {book.title}, {len(chapters_data)} 章")
+        
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         book = db.query(Book).filter(Book.id == book_id).first()
         if book:
             book.status = "failed"
@@ -245,6 +261,8 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
                 "id": ch.id,
                 "number": ch.number,
                 "title": ch.title,
+                "content": ch.content[:500] if ch.content else "",  # 返回前500字符用于预览
+                "page_range": ch.page_range,
                 "status": ch.status,
                 "duration": ch.duration,
                 "has_script": bool(ch.script),
@@ -874,3 +892,440 @@ async def delete_book(
     db.commit()
     
     return {"message": "书籍已删除"}
+
+
+# ==================== 章节管理 API ====================
+
+@router.get("/{book_id}/chapters/{chapter_num}/content")
+async def get_chapter_content(
+    book_id: str, 
+    chapter_num: int, 
+    format: str = "md",
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """获取章节内容（支持 Markdown 格式）"""
+    
+    chapter = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.number == chapter_num
+    ).first()
+    
+    if not chapter:
+        raise HTTPException(404, "章节不存在")
+    
+    content = chapter.content or ""
+    
+    if format == "md":
+        # 转换为 Markdown 格式
+        md_content = f"# 第{chapter.number}章 {chapter.title}\n\n"
+        if chapter.page_range:
+            md_content += f"> 📄 页码范围：{chapter.page_range}\n\n"
+        md_content += "---\n\n"
+        md_content += content
+        
+        return {
+            "number": chapter.number,
+            "title": chapter.title,
+            "content": md_content,
+            "raw_content": content,
+            "page_range": chapter.page_range,
+            "word_count": len(content)
+        }
+    
+    return {
+        "number": chapter.number,
+        "title": chapter.title,
+        "content": content,
+        "page_range": chapter.page_range,
+        "word_count": len(content)
+    }
+
+
+@router.put("/{book_id}/chapters/{chapter_num}/content")
+async def update_chapter_content(
+    book_id: str, 
+    chapter_num: int, 
+    data: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """更新章节内容"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    if book.api_key != user.api_key:
+        raise HTTPException(403, "无权操作此书籍")
+    
+    chapter = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.number == chapter_num
+    ).first()
+    
+    if not chapter:
+        raise HTTPException(404, "章节不存在")
+    
+    # 更新内容
+    if "content" in data:
+        chapter.content = data["content"][:10000]  # 限制长度
+    
+    if "title" in data:
+        chapter.title = data["title"][:255]
+    
+    db.commit()
+    
+    return {"message": "章节内容已更新", "chapter_number": chapter_num}
+
+
+@router.post("/{book_id}/chapters/merge")
+async def merge_chapters(
+    book_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """合并多个章节"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    if book.api_key != user.api_key:
+        raise HTTPException(403, "无权操作此书籍")
+    
+    chapter_numbers = data.get("chapters", [])
+    new_title = data.get("title", "")
+    
+    if len(chapter_numbers) < 2:
+        raise HTTPException(400, "至少需要选择2个章节进行合并")
+    
+    # 获取要合并的章节
+    chapters = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.number.in_(chapter_numbers)
+    ).order_by(Chapter.number).all()
+    
+    if len(chapters) != len(chapter_numbers):
+        raise HTTPException(400, "部分章节不存在")
+    
+    # 合并内容
+    merged_content = "\n\n".join([ch.content or "" for ch in chapters])
+    merged_title = new_title or f"第{chapters[0].number}-{chapters[-1].number}章"
+    
+    # 删除旧章节
+    for ch in chapters:
+        db.delete(ch)
+    
+    # 创建新章节
+    new_chapter = Chapter(
+        book_id=book_id,
+        number=chapters[0].number,
+        title=merged_title,
+        content=merged_content[:15000],
+        page_range=f"{chapters[0].page_range or ''}-{chapters[-1].page_range or ''}",
+        status="pending"
+    )
+    db.add(new_chapter)
+    
+    # 重新编号后续章节
+    remaining_chapters = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.number > chapters[-1].number
+    ).order_by(Chapter.number).all()
+    
+    offset = len(chapters) - 1
+    for ch in remaining_chapters:
+        ch.number -= offset
+    
+    # 更新书籍章节数
+    book.total_chapters = db.query(Chapter).filter(Chapter.book_id == book_id).count()
+    db.commit()
+    
+    return {
+        "message": f"已合并 {len(chapters)} 个章节",
+        "new_chapter_number": chapters[0].number,
+        "total_chapters": book.total_chapters
+    }
+
+
+@router.post("/{book_id}/chapters/{chapter_num}/split")
+async def split_chapter(
+    book_id: str,
+    chapter_num: int,
+    data: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """拆分章节"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    if book.api_key != user.api_key:
+        raise HTTPException(403, "无权操作此书籍")
+    
+    chapter = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.number == chapter_num
+    ).first()
+    
+    if not chapter:
+        raise HTTPException(404, "章节不存在")
+    
+    split_position = data.get("position", 0.5)  # 拆分位置（0-1）
+    first_title = data.get("first_title", f"第{chapter_num}章（上）")
+    second_title = data.get("second_title", f"第{chapter_num}章（下）")
+    
+    content = chapter.content or ""
+    split_index = int(len(content) * split_position)
+    
+    # 尝试在段落边界拆分
+    for i in range(split_index, min(split_index + 500, len(content))):
+        if content[i:i+2] == "\n\n":
+            split_index = i
+            break
+    
+    first_content = content[:split_index]
+    second_content = content[split_index:]
+    
+    # 更新原章节
+    chapter.title = first_title
+    chapter.content = first_content
+    
+    # 创建新章节（插入到后面）
+    # 先移动后面的章节
+    later_chapters = db.query(Chapter).filter(
+        Chapter.book_id == book_id,
+        Chapter.number > chapter_num
+    ).order_by(Chapter.number.desc()).all()
+    
+    for ch in later_chapters:
+        ch.number += 1
+    
+    new_chapter = Chapter(
+        book_id=book_id,
+        number=chapter_num + 1,
+        title=second_title,
+        content=second_content,
+        status="pending"
+    )
+    db.add(new_chapter)
+    
+    # 更新书籍章节数
+    book.total_chapters = db.query(Chapter).filter(Chapter.book_id == book_id).count()
+    db.commit()
+    
+    return {
+        "message": "章节已拆分",
+        "first_chapter": chapter_num,
+        "second_chapter": chapter_num + 1,
+        "total_chapters": book.total_chapters
+    }
+
+
+@router.post("/{book_id}/re-chapter")
+async def re_chapter_book(
+    book_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """重新智能分章（使用 LLM）"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    if book.api_key != user.api_key:
+        raise HTTPException(403, "无权操作此书籍")
+    
+    # 检查是否有页面数据
+    if not book.pages_json:
+        raise HTTPException(400, "没有可用的页面数据，请重新上传文件")
+    
+    # 解析页面数据
+    pages = json.loads(book.pages_json)
+    
+    # 获取参数
+    force_llm = data.get("force_llm", True)
+    max_chapters = data.get("max_chapters", 0)  # 0 表示不限制
+    
+    # 删除旧章节
+    db.query(Chapter).filter(Chapter.book_id == book_id).delete()
+    
+    # 异步执行重新分章
+    run_re_chapter(book_id, pages, force_llm, max_chapters)
+    
+    return {"message": "正在重新分章..."}
+
+
+def run_re_chapter(book_id: str, pages: List[str], force_llm: bool, max_chapters: int):
+    """后台执行重新分章"""
+    import threading
+    import asyncio
+    
+    def run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(do_re_chapter(book_id, pages, force_llm, max_chapters))
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+
+
+async def do_re_chapter(book_id: str, pages: List[str], force_llm: bool, max_chapters: int):
+    """执行重新分章"""
+    from ..database import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if not book:
+            return
+        
+        book.status = "re_chaptering"
+        db.commit()
+        
+        # 合并页面文本
+        text = "\n\n".join([f"--- PAGE {i+1} ---\n{p}" for i, p in enumerate(pages)])
+        
+        # 智能分章
+        chapters_data = await ocr_service.extract_chapters_smart(text, pages, force_llm=force_llm)
+        
+        # 如果设置了最大章节数，合并多余章节
+        if max_chapters > 0 and len(chapters_data) > max_chapters:
+            # 简单合并策略：将最后几个章节合并
+            chapters_to_merge = len(chapters_data) - max_chapters + 1
+            merged_content = "\n\n".join([ch["content"] for ch in chapters_data[-chapters_to_merge:]])
+            chapters_data = chapters_data[:-chapters_to_merge]
+            chapters_data.append({
+                "number": max_chapters,
+                "title": f"第{max_chapters}章",
+                "content": merged_content[:15000]
+            })
+        
+        # 保存新章节
+        for ch in chapters_data:
+            chapter = Chapter(
+                book_id=book_id,
+                number=ch["number"],
+                title=ch["title"],
+                content=ch["content"][:8000],
+                page_range=ch.get("page_range", ""),
+                status="pending"
+            )
+            db.add(chapter)
+        
+        book.total_chapters = len(chapters_data)
+        book.status = "ready"
+        db.commit()
+        
+    except Exception as e:
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if book:
+            book.status = "failed"
+            book.error_message = f"重新分章失败: {str(e)}"
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.get("/{book_id}/pages")
+async def get_book_pages(
+    book_id: str,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """获取书籍所有页面（用于手动调整章节）"""
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    if not book.pages_json:
+        raise HTTPException(404, "没有可用的页面数据")
+    
+    pages = json.loads(book.pages_json)
+    
+    return {
+        "total_pages": len(pages),
+        "pages": [
+            {"number": i + 1, "content": p[:500] + ("..." if len(p) > 500 else "")}
+            for i, p in enumerate(pages)
+        ]
+    }
+
+
+@router.post("/{book_id}/chapters/manual")
+async def set_chapters_manual(
+    book_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(get_optional_user)
+):
+    """手动设置章节划分"""
+    
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "书籍不存在")
+    
+    if book.api_key != user.api_key:
+        raise HTTPException(403, "无权操作此书籍")
+    
+    if not book.pages_json:
+        raise HTTPException(400, "没有可用的页面数据")
+    
+    pages = json.loads(book.pages_json)
+    chapters_config = data.get("chapters", [])
+    
+    if not chapters_config:
+        raise HTTPException(400, "请提供章节配置")
+    
+    # 删除旧章节
+    db.query(Chapter).filter(Chapter.book_id == book_id).delete()
+    
+    # 根据配置创建新章节
+    for i, ch_config in enumerate(chapters_config):
+        start_page = ch_config.get("start_page", 1) - 1
+        end_page = ch_config.get("end_page", len(pages))
+        
+        content = "\n\n".join(pages[start_page:end_page])
+        
+        chapter = Chapter(
+            book_id=book_id,
+            number=i + 1,
+            title=ch_config.get("title", f"第{i+1}章"),
+            content=content[:15000],
+            page_range=f"{start_page + 1}-{end_page}",
+            status="pending"
+        )
+        db.add(chapter)
+    
+    book.total_chapters = len(chapters_config)
+    db.commit()
+    
+    return {
+        "message": f"已设置 {len(chapters_config)} 个章节",
+        "total_chapters": book.total_chapters
+    }

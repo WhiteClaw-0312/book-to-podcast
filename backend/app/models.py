@@ -100,6 +100,10 @@ class Book(Base):
     script_progress = Column(Integer, default=0)
     audio_progress = Column(Integer, default=0)
     
+    # 新增：用于章节管理
+    raw_text = Column(Text, nullable=True)  # 原始 OCR 文本
+    pages_json = Column(Text, nullable=True)  # JSON 格式的页面数据
+    
     # 关系
     chapters = relationship("Chapter", back_populates="book", cascade="all, delete-orphan")
     tasks = relationship("TaskQueue", back_populates="book", cascade="all, delete-orphan")
@@ -116,6 +120,7 @@ class Chapter(Base):
     number = Column(Integer)
     title = Column(String(255))
     content = Column(Text, nullable=True)  # OCR/用户输入的文本
+    page_range = Column(String(50), nullable=True)  # 页码范围，如 "1-15"
     script = Column(Text, nullable=True)  # 生成的文稿 JSON
     script_edited = Column(Text, nullable=True)  # 用户编辑后的文稿
     voice_mapping = Column(JSON, nullable=True)  # {"小北": "zh-CN-XiaoxiaoNeural", "阿南": "zh-CN-YunxiNeural"}

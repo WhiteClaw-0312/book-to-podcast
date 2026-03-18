@@ -9,6 +9,7 @@ const router = createRouter({
   routes: [
     { path: '/', component: () => import('./views/Home.vue') },
     { path: '/book/:id', component: () => import('./views/BookDetail.vue') },
+    { path: '/book/:id/chapters', component: () => import('./views/ChapterManager.vue') },
     { path: '/book/:id/script', component: () => import('./views/ScriptEditor.vue') },
     { path: '/prompts', component: () => import('./views/PromptEditor.vue') },
     { path: '/balance', component: () => import('./views/Balance.vue') }
