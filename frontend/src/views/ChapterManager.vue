@@ -378,141 +378,75 @@ const renderMarkdown = (text: string): string => {
     <div class="main-content" v-else-if="book">
       <!-- ========== 章节视图 ========== -->
       <template v-if="viewMode === 'chapters'">
-        <!-- 左侧章节列表 -->
-        <div class="chapter-list-panel">
-          <div class="panel-header">
-            <h2>📚 章节列表 ({{ book.total_chapters }} 章)</h2>
-            <button class="btn btn-sm btn-outline" @click="showReChapterDialog = true">
-              🔄 重新分章
-            </button>
+        <div class="chapters-view">
+          <div class="chapters-header">
+            <div class="header-left">
+              <h2>📚 章节列表</h2>
+              <p class="hint">共 {{ book.total_chapters }} 个章节 · 点击卡片查看和编辑内容</p>
+            </div>
+            <div class="header-actions">
+              <button class="btn btn-secondary" @click="showReChapterDialog = true">
+                🔄 重新分章
+              </button>
+              <button class="btn btn-primary" @click="goToGenerate">
+                ✅ 完成编辑
+              </button>
+            </div>
           </div>
           
-          <div class="chapter-list">
-            <div
+          <!-- 章节网格 -->
+          <div class="chapters-grid">
+            <div 
               v-for="ch in book.chapters"
               :key="ch.number"
-              :class="[
-                'chapter-item',
-                { active: currentChapter?.number === ch.number },
-                { selected: selectedChapters.includes(ch.number) }
-              ]"
-              @click="multiSelectMode ? toggleChapterSelection(ch.number) : selectChapter(ch.number)"
+              :class="['chapter-card', { expanded: currentChapter?.number === ch.number }]"
+              @click="selectChapter(ch.number)"
             >
-              <div class="chapter-num">
-                <input
-                  v-if="multiSelectMode"
-                  type="checkbox"
-                  :checked="selectedChapters.includes(ch.number)"
-                  @click.stop
-                  @change="toggleChapterSelection(ch.number)"
-                />
-                <span>第{{ ch.number }}章</span>
-                <span v-if="ch.page_range" class="page-range">📄 {{ ch.page_range }}</span>
+              <!-- 章节卡片头部 -->
+              <div class="chapter-card-header">
+                <span class="chapter-card-num">第{{ ch.number }}章</span>
+                <span class="chapter-card-title">{{ ch.title }}</span>
+                <span class="chapter-card-meta">{{ (ch.content || '').length }} 字</span>
               </div>
-              <div class="chapter-title">{{ ch.title }}</div>
-              <div class="chapter-preview">{{ (ch.content || '').substring(0, 80) }}...</div>
-              <div class="chapter-meta">
-                <span>{{ (ch.content || '').length }} 字</span>
+              
+              <!-- 章节内容预览 -->
+              <div class="chapter-card-content">
+                {{ (ch.content || '').substring(0, 300) }}{{ (ch.content || '').length > 300 ? '...' : '' }}
               </div>
-            </div>
-          </div>
-          
-          <div class="panel-footer">
-            <button class="btn btn-primary btn-block" @click="goToGenerate">
-              ✅ 完成编辑，生成文稿
-            </button>
-          </div>
-        </div>
-
-        <!-- 右侧内容区 -->
-        <div class="content-panel" v-if="currentChapter">
-          <div class="content-header">
-            <div class="chapter-info">
-              <h2>{{ currentChapter.title }}</h2>
-              <div class="meta">
-                <span v-if="currentChapter.page_range">📄 {{ currentChapter.page_range }} 页</span>
-                <span>{{ currentChapter.word_count }} 字</span>
-              </div>
-            </div>
-            
-            <div class="content-actions">
-              <button 
-                v-if="!isEditing"
-                class="btn btn-primary"
-                @click="isEditing = true"
-              >✏️ 编辑</button>
-              <template v-else>
-                <button class="btn btn-secondary" @click="cancelEdit" :disabled="saving">取消</button>
-                <button class="btn btn-primary" @click="saveEdit" :disabled="saving">
-                  {{ saving ? '保存中...' : '💾 保存' }}
-                </button>
+              
+              <!-- 展开后显示完整内容和编辑按钮 -->
+              <template v-if="currentChapter?.number === ch.number">
+                <div class="chapter-card-actions">
+                  <button class="btn btn-sm btn-primary" @click.stop="isEditing = true" v-if="!isEditing">
+                    ✏️ 编辑
+                  </button>
+                </div>
               </template>
             </div>
           </div>
-
-          <div class="edit-mode-tabs" v-if="isEditing">
-            <button 
-              :class="['tab-btn', { active: editMode === 'edit' }]"
-              @click="editMode = 'edit'"
-            >📝 编辑内容</button>
-            <button 
-              :class="['tab-btn', { active: editMode === 'split' }]"
-              @click="editMode = 'split'"
-            >✂️ 拆分章节</button>
-          </div>
-
-          <div class="content-body">
-            <template v-if="isEditing && editMode === 'edit'">
-              <div class="edit-form">
-                <div class="form-group">
-                  <label>章节标题</label>
-                  <input type="text" class="input" v-model="editingTitle" placeholder="输入章节标题" />
-                </div>
-                <div class="form-group">
-                  <label>章节内容</label>
-                  <textarea class="textarea content-editor" v-model="editingContent" placeholder="输入章节内容"></textarea>
-                </div>
+          
+          <!-- 编辑面板（浮动） -->
+          <div class="edit-panel" v-if="currentChapter && isEditing">
+            <div class="edit-panel-header">
+              <h3>编辑第{{ currentChapter.number }}章</h3>
+              <button class="close-btn" @click="cancelEdit">×</button>
+            </div>
+            <div class="edit-panel-body">
+              <div class="form-group">
+                <label>章节标题</label>
+                <input type="text" class="input" v-model="editingTitle" placeholder="输入章节标题" />
               </div>
-            </template>
-
-            <template v-else-if="isEditing && editMode === 'split'">
-              <div class="split-form">
-                <p class="hint">将当前章节拆分为两个章节</p>
-                <div class="form-group">
-                  <label>拆分位置</label>
-                  <input type="range" min="0.1" max="0.9" step="0.1" v-model="splitPosition" class="range-slider" />
-                  <div class="range-labels">
-                    <span>开头</span>
-                    <span>{{ Math.round(splitPosition * 100) }}%</span>
-                    <span>结尾</span>
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label>上半部分标题</label>
-                    <input type="text" class="input" v-model="splitFirstTitle" :placeholder="`第${currentChapter.number}章（上）`" />
-                  </div>
-                  <div class="form-group">
-                    <label>下半部分标题</label>
-                    <input type="text" class="input" v-model="splitSecondTitle" :placeholder="`第${currentChapter.number}章（下）`" />
-                  </div>
-                </div>
-                <button class="btn btn-primary" @click="splitChapter" :disabled="saving">
-                  {{ saving ? '拆分中...' : '✂️ 确认拆分' }}
-                </button>
+              <div class="form-group">
+                <label>章节内容</label>
+                <textarea class="textarea" v-model="editingContent" placeholder="输入章节内容"></textarea>
               </div>
-            </template>
-
-            <template v-else>
-              <div class="markdown-preview" v-html="renderMarkdown(currentChapter.content)"></div>
-            </template>
-          </div>
-        </div>
-
-        <div class="content-panel empty" v-else>
-          <div class="empty-state">
-            <div class="empty-icon">📖</div>
-            <p>请从左侧选择一个章节查看内容</p>
+            </div>
+            <div class="edit-panel-footer">
+              <button class="btn btn-secondary" @click="cancelEdit" :disabled="saving">取消</button>
+              <button class="btn btn-primary" @click="saveEdit" :disabled="saving">
+                {{ saving ? '保存中...' : '💾 保存' }}
+              </button>
+            </div>
           </div>
         </div>
       </template>
@@ -635,63 +569,162 @@ const renderMarkdown = (text: string): string => {
 /* 主内容区 */
 .main-content { min-height: calc(100vh - 140px); }
 
-/* 章节视图布局 */
-.main-content:has(.chapter-list-panel) {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: 20px;
-}
-
-/* 左侧章节列表 */
-.chapter-list-panel {
+/* 章节视图 - 新设计 */
+.chapters-view {
   background: rgba(0, 40, 25, 0.6);
   border-radius: 12px;
-  display: flex;
-  flex-direction: column;
+  padding: 24px;
 }
-.panel-header {
-  padding: 16px;
-  border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+
+.chapters-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  margin-bottom: 24px;
 }
-.panel-header h2 { font-size: 16px; color: #81c784; margin: 0; }
-.chapter-list { flex: 1; overflow-y: auto; padding: 8px; max-height: calc(100vh - 280px); }
-.chapter-item {
-  padding: 12px 16px;
-  border-radius: 8px;
+
+.chapters-header .header-left h2 {
+  color: #81c784;
+  margin: 0 0 8px 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+/* 章节网格 */
+.chapters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 16px;
+}
+
+.chapter-card {
+  background: rgba(0, 30, 20, 0.5);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 10px;
+  padding: 16px;
   cursor: pointer;
   transition: all 0.2s;
-  margin-bottom: 4px;
+  max-height: 250px;
+  overflow-y: auto;
 }
-.chapter-item:hover { background: rgba(76, 175, 80, 0.1); }
-.chapter-item.active { background: rgba(76, 175, 80, 0.2); border-left: 3px solid #4caf50; }
-.chapter-item.selected { background: rgba(33, 150, 243, 0.15); border-left: 3px solid #2196f3; }
-.chapter-num { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #81c784; margin-bottom: 4px; }
-.chapter-num input { width: 16px; height: 16px; }
-.page-range { color: #666; font-size: 11px; }
-.chapter-title { font-size: 14px; color: #e8f5e9; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chapter-preview { font-size: 12px; color: #666; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chapter-meta { font-size: 11px; color: #555; }
-.panel-footer { padding: 16px; border-top: 1px solid rgba(76, 175, 80, 0.2); }
 
-/* 右侧内容区 */
-.content-panel {
+.chapter-card:hover {
+  border-color: rgba(76, 175, 80, 0.5);
+}
+
+.chapter-card.expanded {
+  border-color: #4caf50;
   background: rgba(0, 40, 25, 0.6);
+}
+
+.chapter-card::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chapter-card::-webkit-scrollbar-thumb {
+  background: rgba(76, 175, 80, 0.3);
+  border-radius: 3px;
+}
+
+.chapter-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  position: sticky;
+  top: -16px;
+  background: rgba(0, 30, 20, 0.95);
+  padding: 8px 0;
+  margin: -16px -16px 12px -16px;
+  padding: 12px 16px;
+}
+
+.chapter-card-num {
+  background: rgba(76, 175, 80, 0.2);
+  color: #81c784;
+  padding: 2px 10px;
   border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chapter-card-title {
+  flex: 1;
+  color: #e8f5e9;
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-card-meta {
+  font-size: 11px;
+  color: #666;
+}
+
+.chapter-card-content {
+  font-size: 13px;
+  color: #a5d6a7;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chapter-card-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+/* 编辑面板 */
+.edit-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 500px;
+  max-height: 80vh;
+  background: linear-gradient(135deg, #1a3a2a 0%, #0f2419 100%);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 100;
   display: flex;
   flex-direction: column;
 }
-.content-panel.empty { display: flex; align-items: center; justify-content: center; }
-.empty-state { text-align: center; color: #666; }
-.empty-icon { font-size: 48px; margin-bottom: 16px; }
-.content-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+
+.edit-panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.edit-panel-header h3 {
+  color: #81c784;
+  margin: 0;
+}
+
+.edit-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.edit-panel-body .textarea {
+  min-height: 250px;
+}
+
+.edit-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
 }
 .chapter-info h2 { font-size: 18px; color: #e8f5e9; margin: 0 0 8px 0; }
 .meta { font-size: 12px; color: #81c784; display: flex; gap: 16px; }

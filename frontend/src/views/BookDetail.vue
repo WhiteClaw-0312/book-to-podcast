@@ -50,6 +50,13 @@ const loading = ref(true)
 const generating = ref(false)
 const selectedChapters = ref<number[]>([])
 
+// 章节预览编辑
+const showChapterModal = ref(false)
+const currentChapter = ref<Chapter | null>(null)
+const editChapterTitle = ref('')
+const editChapterContent = ref('')
+const savingChapter = ref(false)
+
 // 音色相关
 const voices = ref<Voice[]>([])
 const showVoiceSelector = ref(false)
@@ -59,10 +66,10 @@ const voiceMapping = ref<Record<string, string>>({
 })
 
 // 播放器状态
-const currentChapter = ref<Chapter | null>(null)
+const playingChapter = ref<Chapter | null>(null)
 const isPlaying = ref(false)
 const currentTime = ref(0)
-const duration = ref(0)
+const playDuration = ref(0)
 const audioElement = ref<HTMLAudioElement | null>(null)
 const scriptData = ref<Dialogue[]>([])
 const currentDialogueIndex = ref(-1)
@@ -131,6 +138,56 @@ const stopPreview = () => {
   previewingVoice.value = null
 }
 
+// 打开章节预览
+const openChapterPreview = async (chapter: Chapter) => {
+  currentChapter.value = chapter
+  editChapterTitle.value = chapter.title
+  editChapterContent.value = chapter.content || ''
+  showChapterModal.value = true
+}
+
+// 关闭章节预览
+const closeChapterModal = () => {
+  showChapterModal.value = false
+  currentChapter.value = null
+}
+
+// 保存章节内容
+const saveChapterContent = async () => {
+  if (!currentChapter.value) return
+  
+  savingChapter.value = true
+  try {
+    const res = await apiFetch(`/api/books/${route.params.id}/chapters/${currentChapter.value.number}/content`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        title: editChapterTitle.value,
+        content: editChapterContent.value
+      })
+    })
+    
+    if (res.ok) {
+      // 更新本地数据
+      if (book.value) {
+        const ch = book.value.chapters.find(c => c.number === currentChapter.value!.number)
+        if (ch) {
+          ch.title = editChapterTitle.value
+          ch.content = editChapterContent.value
+        }
+      }
+      showChapterModal.value = false
+      alert('保存成功')
+    } else {
+      const err = await res.json()
+      throw new Error(err.detail || '保存失败')
+    }
+  } catch (e: any) {
+    alert('保存失败: ' + e.message)
+  } finally {
+    savingChapter.value = false
+  }
+}
+
 // 获取书籍数据
 const fetchBook = async () => {
   try {
@@ -152,8 +209,8 @@ const fetchScript = async (chapterNum: number) => {
     scriptData.value = data.dialogues || []
     
     // 根据时长分配时间
-    if (scriptData.value.length > 0 && duration.value > 0) {
-      const avgDuration = duration.value / scriptData.value.length
+    if (scriptData.value.length > 0 && playDuration.value > 0) {
+      const avgDuration = playDuration.value / scriptData.value.length
       scriptData.value.forEach((d, i) => {
         d.start_time = i * avgDuration
         d.end_time = (i + 1) * avgDuration
@@ -306,7 +363,7 @@ const playChapter = async (chapter: Chapter) => {
   audioElement.value = audio
   
   audio.onloadedmetadata = async () => {
-    duration.value = audio.duration
+    playDuration.value = audio.duration
     await fetchScript(chapter.number)
   }
   
@@ -391,8 +448,8 @@ const formatTime = (seconds: number) => {
 
 // 进度百分比
 const progressPercent = computed(() => {
-  if (duration.value === 0) return 0
-  return (currentTime.value / duration.value) * 100
+  if (playDuration.value === 0) return 0
+  return (currentTime.value / playDuration.value) * 100
 })
 
 // 下载音频
@@ -528,53 +585,51 @@ onUnmounted(() => {
         <div class="card-header-row">
           <div>
             <h2 class="card-title">📖 OCR 解析完成</h2>
-            <p class="card-hint">共识别 {{ book.total_chapters }} 个章节，请确认内容后生成文稿</p>
+            <p class="card-hint">共识别 {{ book.total_chapters }} 个章节</p>
           </div>
         </div>
         
-        <!-- OCR 结果预览入口 -->
-        <div class="ocr-preview-section">
-          <div class="ocr-info-card" @click="router.push(`/book/${route.params.id}/chapters`)">
-            <div class="ocr-info-icon">📄</div>
-            <div class="ocr-info-content">
-              <h3>查看解析结果</h3>
-              <p>点击查看每章内容、编辑章节标题、或重新分章</p>
+        <!-- 查看解析结果入口 -->
+        <div class="action-entry">
+          <button class="btn btn-primary btn-lg" @click="router.push(`/book/${route.params.id}/chapters`)">
+            📄 查看解析结果
+          </button>
+          <p class="entry-hint">点击查看每章内容、编辑章节标题、选择章节生成文稿</p>
+        </div>
+      </div>
+
+      <!-- 章节预览对话框 -->
+      <div v-if="showChapterModal" class="modal-overlay" @click.self="closeChapterModal">
+        <div class="modal-content chapter-modal">
+          <div class="modal-header">
+            <h2>第{{ currentChapter?.number }}章 · {{ currentChapter?.title }}</h2>
+            <button class="close-btn" @click="closeChapterModal">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>章节标题</label>
+              <input type="text" class="input" v-model="editChapterTitle" placeholder="输入章节标题" />
             </div>
-            <div class="ocr-info-arrow">→</div>
+            <div class="form-group">
+              <label>章节内容</label>
+              <textarea 
+                class="textarea chapter-textarea" 
+                v-model="editChapterContent" 
+                placeholder="章节内容"
+              ></textarea>
+            </div>
+            <div class="chapter-meta-info">
+              <span>{{ editChapterContent.length }} 字</span>
+              <span v-if="currentChapter?.page_range">· {{ currentChapter.page_range }} 页</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="closeChapterModal">取消</button>
+            <button class="btn btn-primary" @click="saveChapterContent" :disabled="savingChapter">
+              {{ savingChapter ? '保存中...' : '💾 保存' }}
+            </button>
           </div>
         </div>
-        
-        <div class="divider">
-          <span>确认无误后，选择章节生成文稿</span>
-        </div>
-        
-        <div class="select-actions">
-          <button class="btn btn-secondary" @click="selectAll">全选</button>
-          <button class="btn btn-secondary" @click="selectNone">全不选</button>
-          <div class="select-info">已选 {{ selectedCount }} 章</div>
-        </div>
-        
-        <div class="chapter-grid">
-          <div
-            v-for="ch in book.chapters"
-            :key="ch.number"
-            :class="['chapter-item', { selected: selectedChapters.includes(ch.number) }]"
-            @click="selectedChapters.includes(ch.number) 
-              ? selectedChapters = selectedChapters.filter(n => n !== ch.number)
-              : selectedChapters.push(ch.number)"
-          >
-            <div class="chapter-item-num">第{{ ch.number }}章</div>
-            <div class="chapter-item-title">{{ ch.title }}</div>
-          </div>
-        </div>
-        
-        <button 
-          class="btn btn-primary generate-btn"
-          @click="generateScripts" 
-          :disabled="!selectedCount || generating"
-        >
-          {{ generating ? '⏳ 生成中...' : `📝 生成文稿（免费）` }}
-        </button>
       </div>
 
       <!-- 文稿就绪，等待编辑/生成音频 -->
@@ -1544,62 +1599,127 @@ onUnmounted(() => {
   margin-bottom: 0;
 }
 
-/* OCR 结果预览入口 */
-.ocr-preview-section {
-  margin-bottom: 24px;
+/* 章节预览列表 */
+.chapter-preview-list {
+  margin-bottom: 20px;
 }
 
-.ocr-info-card {
+.chapter-preview-item {
+  padding: 16px;
+  background: rgba(0, 30, 20, 0.4);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.chapter-preview-item:hover {
+  border-color: rgba(76, 175, 80, 0.5);
+  background: rgba(0, 40, 25, 0.5);
+}
+
+.chapter-preview-item::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chapter-preview-item::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.chapter-preview-item::-webkit-scrollbar-thumb {
+  background: rgba(76, 175, 80, 0.4);
+  border-radius: 3px;
+}
+
+.chapter-preview-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 20px;
-  background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(46, 125, 50, 0.1) 100%);
-  border: 1px solid rgba(76, 175, 80, 0.3);
+  gap: 12px;
+  margin-bottom: 10px;
+  position: sticky;
+  top: 0;
+  background: rgba(0, 30, 20, 0.9);
+  padding: 4px 0;
+  margin: -16px -16px 10px -16px;
+  padding: 12px 16px;
+}
+
+.chapter-preview-num {
+  background: rgba(76, 175, 80, 0.2);
+  color: #81c784;
+  padding: 2px 10px;
   border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.3s;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.ocr-info-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(76, 175, 80, 0.2);
-  border-color: #4caf50;
-}
-
-.ocr-info-icon {
-  font-size: 32px;
-  line-height: 1;
-}
-
-.ocr-info-content {
+.chapter-preview-title {
+  color: #e8f5e9;
+  font-size: 15px;
+  font-weight: 500;
   flex: 1;
 }
 
-.ocr-info-content h3 {
-  color: #e8f5e9;
-  font-size: 16px;
-  margin: 0 0 4px 0;
-}
-
-.ocr-info-content p {
-  color: #81c784;
-  font-size: 13px;
-  margin: 0;
-}
-
-.ocr-info-arrow {
-  font-size: 20px;
+.chapter-preview-expand {
+  font-size: 12px;
   color: #4caf50;
+  opacity: 0;
+  transition: opacity 0.2s;
 }
 
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-  color: #666;
+.chapter-preview-item:hover .chapter-preview-expand {
+  opacity: 1;
+}
+
+.chapter-preview-content {
+  color: #a5d6a7;
   font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chapter-preview-meta {
+  font-size: 11px;
+  color: #666;
+  border-top: 1px solid rgba(76, 175, 80, 0.1);
+  padding-top: 10px;
+}
+
+/* 操作区域 */
+.action-area {
+  padding-top: 16px;
+  border-top: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+/* 章节编辑对话框 */
+.chapter-modal {
+  max-width: 700px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.chapter-modal .modal-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.chapter-textarea {
+  min-height: 350px;
+  max-height: 50vh;
+  resize: vertical;
+}
+
+.chapter-meta-info {
+  font-size: 12px;
+  color: #666;
+  margin-top: 8px;
 }
 
 .divider::before,

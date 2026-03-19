@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { apiFetch } from '../api'
 import AuthModal from '../components/AuthModal.vue'
+
+const router = useRouter()
 
 // 用户状态
 const user = ref<any>(null)
@@ -584,6 +587,11 @@ const viewOcrResult = (bookId: string) => {
   router.push(`/book/${bookId}/chapters`)
 }
 
+// 跳转到书籍详情页
+const goToBookDetail = (bookId: string) => {
+  router.push(`/book/${bookId}`)
+}
+
 // 生成文稿
 const generateScripts = async () => {
   if (!selectedChapters.value.length || !selectedBookId.value) return
@@ -986,170 +994,48 @@ onUnmounted(() => {
       
       <!-- 队列列表 -->
       <div v-else class="queue-list">
-        <!-- 书籍列表 -->
+        <!-- 书籍列表 - 点击整个卡片进入详情页 -->
         <div 
           v-for="book in paginatedBooks" 
           :key="book.id" 
-          :class="['queue-item', { expanded: selectedBookId === book.id }]"
+          class="book-card"
+          @click="goToBookDetail(book.id)"
         >
-          <!-- 书籍标题行 -->
-          <div class="queue-item-header" @click="selectBook(book.id)">
-            <div class="queue-item-info">
-              <span class="queue-item-title">{{ book.title }}</span>
-              <span class="queue-item-meta">
-                {{ book.total_chapters }}章 · {{ formatDate(book.created_at) }}
-              </span>
-            </div>
-            <div class="queue-item-status">
-              <span v-if="book.status === 'ready'" class="status-tag ready">📄 OCR完成</span>
-              <span v-else-if="book.status === 'script_ready'" class="status-tag script">📝 文稿就绪</span>
-              <span v-else-if="book.status === 'generating_script'" class="status-tag processing">⏳ 生成文稿中</span>
-              <span v-else-if="book.status === 'generating_audio'" class="status-tag processing">⏳ 生成音频中</span>
-              <span v-else-if="book.status === 'completed'" class="status-tag completed">✅ 已完成</span>
-              <span v-else-if="book.status === 'partial'" class="status-tag partial">📊 部分完成</span>
-              <span v-else class="status-tag">{{ book.status }}</span>
-            </div>
-            <button class="delete-btn" @click.stop="deleteBook(book.id)" title="删除">🗑️</button>
+          <!-- 书籍图标 -->
+          <div class="book-card-icon">
+            <span v-if="book.status === 'ready'">📄</span>
+            <span v-else-if="book.status === 'script_ready'">📝</span>
+            <span v-else-if="book.status === 'completed'">🎧</span>
+            <span v-else-if="book.status === 'generating_script'">⏳</span>
+            <span v-else-if="book.status === 'generating_audio'">🎙️</span>
+            <span v-else>📄</span>
           </div>
           
-          <!-- 展开的详情 -->
-          <div v-if="selectedBookId === book.id" class="queue-item-detail">
-            <!-- 正在生成文稿 -->
-            <div v-if="book.status === 'generating_script'" class="progress-section">
-              <div class="progress-header">
-                <span class="progress-label">文稿生成进度</span>
-                <span class="progress-percent">{{ queueProgress?.progress || 0 }}%</span>
-              </div>
-              <div class="progress-bar-container">
-                <div class="progress-bar-fill" :style="{ width: (queueProgress?.progress || 0) + '%' }"></div>
-              </div>
-              <div class="progress-stats">
-                <span>{{ queueProgress?.completed || 0 }} / {{ queueProgress?.total || 0 }} 章</span>
-              </div>
-              
-              <!-- 任务列表 -->
-              <div class="tasks-list" v-if="tasks.length > 0">
-                <div v-for="task in tasks" :key="task.id" class="task-item">
-                  <span class="task-chapter">第{{ task.chapter_number }}章</span>
-                  <span :class="['task-status', task.status]">
-                    {{ task.status === 'pending' ? '⏳' : task.status === 'processing' ? '🔄' : task.status === 'completed' ? '✅' : '❌' }}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- 正在生成音频 -->
-            <div v-else-if="book.status === 'generating_audio'" class="progress-section">
-              <div class="progress-header">
-                <span class="progress-label">音频生成进度</span>
-                <span class="progress-percent">{{ queueProgress?.progress || 0 }}%</span>
-              </div>
-              <div class="progress-bar-container">
-                <div class="progress-bar-fill audio" :style="{ width: (queueProgress?.progress || 0) + '%' }"></div>
-              </div>
-              <div class="progress-stats">
-                <span>{{ queueProgress?.completed || 0 }} / {{ queueProgress?.total || 0 }} 章</span>
-              </div>
-              
-              <!-- 任务列表 -->
-              <div class="tasks-list" v-if="tasks.length > 0">
-                <div v-for="task in tasks" :key="task.id" class="task-item">
-                  <span class="task-chapter">第{{ task.chapter_number }}章</span>
-                  <span :class="['task-status', task.status]">
-                    {{ task.status === 'pending' ? '⏳' : task.status === 'processing' ? '🔄' : task.status === 'completed' ? '✅' : '❌' }}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- OCR完成，可以选择生成文稿 -->
-            <div v-else-if="book.status === 'ready'" class="action-section">
-              <!-- OCR 结果预览入口 -->
-              <div class="ocr-result-card" @click="viewOcrResult(book.id)">
-                <div class="ocr-result-icon">📄</div>
-                <div class="ocr-result-content">
-                  <h4>查看解析结果</h4>
-                  <p>共 {{ book.total_chapters }} 章 · 点击查看每章内容</p>
-                </div>
-                <div class="ocr-result-arrow">→</div>
-              </div>
-              
-              <div class="divider-line">
-                <span>确认无误后，选择章节生成文稿</span>
-              </div>
-              
-              <div class="chapter-select">
-                <button class="btn-small" @click="selectAllChapters">全选</button>
-                <button class="btn-small" @click="deselectAllChapters">全不选</button>
-              </div>
-              <div class="chapter-grid">
-                <div
-                  v-for="ch in selectedBook?.chapters || []"
-                  :key="ch.number"
-                  :class="['chapter-chip', { selected: selectedChapters.includes(ch.number) }]"
-                  @click="toggleChapter(ch.number)"
-                >
-                  {{ ch.number }}
-                </div>
-              </div>
-              <button 
-                class="btn btn-primary action-btn"
-                @click="generateScripts"
-                :disabled="!selectedCount"
-              >
-                📝 生成文稿（已选 {{ selectedCount }} 章）
-              </button>
-            </div>
-            
-            <!-- 文稿就绪，可以查看文稿或生成音频 -->
-            <div v-else-if="book.status === 'script_ready' || book.status === 'partial'" class="action-section">
-              <p class="action-hint">文稿已就绪，查看或生成音频</p>
-              <div class="chapter-list-detail">
-                <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row">
-                  <div class="chapter-info">
-                    <span class="chapter-num">第{{ ch.number }}章</span>
-                    <span class="chapter-title">{{ ch.title }}</span>
-                  </div>
-                  <div class="chapter-actions-row">
-                    <button class="btn-small" @click="viewScript(book.id, ch.number)">📝 查看</button>
-                    <template v-if="ch.has_audio">
-                      <span class="has-audio">✅ {{ formatTime(ch.duration) }}</span>
-                    </template>
-                    <template v-else>
-                      <button class="btn-small primary" @click="generateSingleChapterAudio(book.id, ch.number)">🎙️ 生成</button>
-                    </template>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <!-- 已完成 -->
-            <div v-else-if="book.status === 'completed'" class="completed-section">
-              <p class="completed-hint">🎉 所有章节已完成</p>
-              <div class="chapter-list-detail">
-                <div v-for="ch in selectedBook?.chapters || []" :key="ch.number" class="chapter-row">
-                  <div class="chapter-info">
-                    <span class="chapter-num">第{{ ch.number }}章</span>
-                    <span class="chapter-title">{{ ch.title }}</span>
-                  </div>
-                  <div class="chapter-actions-row">
-                    <button class="btn-small" @click="viewScript(book.id, ch.number)">📝 文稿</button>
-                    <button class="btn-small primary" @click="playChapterAudio(book.id, ch)">🎧 播放</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <!-- 其他状态（pending等） -->
-            <div v-else class="other-status-section">
-              <p class="status-hint">
-                <template v-if="book.status === 'pending'">⏳ 正在识别文档...</template>
-                <template v-else-if="book.status === 'processing'">⏳ 处理中...</template>
-                <template v-else>状态: {{ book.status }}</template>
-              </p>
-              <button class="btn btn-secondary" @click="refreshBookStatus(book.id)">刷新状态</button>
+          <!-- 书籍信息 -->
+          <div class="book-card-info">
+            <div class="book-card-title">{{ book.title }}</div>
+            <div class="book-card-meta">
+              <span>{{ book.total_chapters }}章</span>
+              <span>·</span>
+              <span>{{ formatDate(book.created_at) }}</span>
             </div>
           </div>
+          
+          <!-- 状态标签 -->
+          <div class="book-card-status">
+            <span v-if="book.status === 'ready'" class="status-badge ready">OCR完成</span>
+            <span v-else-if="book.status === 'script_ready'" class="status-badge script">文稿就绪</span>
+            <span v-else-if="book.status === 'completed'" class="status-badge completed">已完成</span>
+            <span v-else-if="book.status === 'generating_script'" class="status-badge processing">生成文稿中...</span>
+            <span v-else-if="book.status === 'generating_audio'" class="status-badge processing">生成音频中...</span>
+            <span v-else class="status-badge">{{ book.status }}</span>
+          </div>
+          
+          <!-- 箭头 -->
+          <div class="book-card-arrow">→</div>
+          
+          <!-- 删除按钮 -->
+          <button class="delete-btn-inline" @click.stop="deleteBook(book.id)" title="删除">🗑️</button>
         </div>
         
         <!-- 分页 -->
@@ -1729,79 +1615,98 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-.queue-item {
-  background: rgba(0, 30, 20, 0.4);
-  border: 1px solid rgba(76, 175, 80, 0.2);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.queue-item.expanded {
-  border-color: #4caf50;
-}
-
-.queue-item-header {
+/* 书籍卡片 - 新设计 */
+.book-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px;
+  gap: 16px;
+  padding: 16px 20px;
+  background: rgba(0, 30, 20, 0.5);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 12px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
-.queue-item-header:hover {
-  background: rgba(76, 175, 80, 0.1);
+.book-card:hover {
+  background: rgba(0, 40, 25, 0.6);
+  border-color: rgba(76, 175, 80, 0.4);
+  transform: translateY(-1px);
 }
 
-.queue-item-info {
+.book-card-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.book-card-info {
   flex: 1;
   min-width: 0;
 }
 
-.queue-item-title {
-  display: block;
+.book-card-title {
   color: #e8f5e9;
   font-size: 15px;
   font-weight: 500;
+  margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.queue-item-meta {
+.book-card-meta {
   font-size: 12px;
   color: #81c784;
+  display: flex;
+  gap: 6px;
 }
 
-.queue-item-status {
+.book-card-status {
   flex-shrink: 0;
 }
 
-.status-tag {
+.status-badge {
   display: inline-block;
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.status-tag.ready { background: rgba(76, 175, 80, 0.2); color: #81c784; }
-.status-tag.script { background: rgba(33, 150, 243, 0.2); color: #64b5f6; }
-.status-tag.processing { background: rgba(255, 152, 0, 0.2); color: #ffb74d; }
-.status-tag.completed { background: rgba(76, 175, 80, 0.3); color: #a5d6a7; }
-.status-tag.partial { background: rgba(156, 39, 176, 0.2); color: #ce93d8; }
+.status-badge.ready { background: rgba(76, 175, 80, 0.2); color: #81c784; }
+.status-badge.script { background: rgba(33, 150, 243, 0.2); color: #64b5f6; }
+.status-badge.processing { background: rgba(255, 152, 0, 0.2); color: #ffb74d; animation: pulse 1.5s infinite; }
+.status-badge.completed { background: rgba(76, 175, 80, 0.3); color: #a5d6a7; }
 
-.delete-btn {
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.book-card-arrow {
+  font-size: 18px;
+  color: #4caf50;
+  transition: transform 0.2s;
+}
+
+.book-card:hover .book-card-arrow {
+  transform: translateX(4px);
+}
+
+.delete-btn-inline {
   background: none;
   border: none;
   font-size: 16px;
   cursor: pointer;
-  padding: 4px;
-  opacity: 0.5;
+  padding: 8px;
+  opacity: 0.4;
   transition: opacity 0.2s;
+  border-radius: 8px;
 }
 
-.delete-btn:hover {
+.delete-btn-inline:hover {
   opacity: 1;
+  background: rgba(244, 67, 54, 0.1);
 }
 
 /* Queue item detail */
