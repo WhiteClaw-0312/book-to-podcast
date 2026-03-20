@@ -13,6 +13,7 @@ from .api import books_router, billing_router
 from .api.auth import router as auth_router
 from .api.prompts import router as prompts_router
 from .api.voices import router as voices_router
+from .api.prompt_configs import router as prompt_configs_router
 
 
 @asynccontextmanager
@@ -86,6 +87,7 @@ async def get_demo_audio():
 app.include_router(auth_router)
 app.include_router(prompts_router)
 app.include_router(voices_router)
+app.include_router(prompt_configs_router)  # 新增：Prompt 配置 API
 app.include_router(books_router)
 app.include_router(billing_router)
 

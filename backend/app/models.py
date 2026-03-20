@@ -126,24 +126,80 @@ class Chapter(Base):
     voice_mapping = Column(JSON, nullable=True)  # {"小北": "zh-CN-XiaoxiaoNeural", "阿南": "zh-CN-YunxiNeural"}
     audio_path = Column(String(500), nullable=True)
     duration = Column(Float, default=0)
-    status = Column(String(20), default="pending")  # pending, script_ready, processing, completed, failed
+    status = Column(String(20), default="pending")  # pending, skilled, script_ready, processing, completed, failed
     error_message = Column(Text, nullable=True)
+    word_count = Column(Integer, default=0)  # 原文字数
     
     # 关系
     book = relationship("Book", back_populates="chapters")
+    skill = relationship("ChapterSkill", back_populates="chapter", uselist=False)
+
+
+class ChapterSkill(Base):
+    """章节 SKILL（Skill Seekers 产物）"""
+    __tablename__ = "chapter_skills"
+    
+    id = Column(String(16), primary_key=True, default=generate_id)
+    chapter_id = Column(String(16), ForeignKey("chapters.id"), unique=True, index=True)
+    
+    # SKILL 结构化内容
+    summary = Column(Text)  # 摘要
+    key_points = Column(JSON)  # 核心观点 ["观点1", "观点2", ...]
+    themes = Column(JSON)  # 主题
+    examples = Column(JSON)  # 示例
+    insights = Column(JSON)  # 见解
+    important_details = Column(JSON)  # 重要细节
+    
+    # 完整 SKILL.md
+    full_skill_md = Column(Text)
+    
+    # 元数据
+    content_length = Column(Integer, default=0)  # 原文长度
+    skill_length = Column(Integer, default=0)  # SKILL 长度
+    processing_time = Column(Float, default=0)  # 处理耗时
+    
+    created_at = Column(DateTime, default=func.now())
+    
+    # 关系
+    chapter = relationship("Chapter", back_populates="skill")
 
 
 class PromptTemplate(Base):
-    """Prompt模版"""
+    """Prompt 模版 / 配置"""
     __tablename__ = "prompt_templates"
     
     id = Column(String(16), primary_key=True, default=generate_id)
     user_id = Column(String(16), ForeignKey("users.id"), nullable=True)  # null表示系统模版
     name = Column(String(255))
     description = Column(Text, nullable=True)
-    content = Column(Text)  # prompt内容
+    
+    # ===== Prompt 配置项 =====
+    # 1. 播客风格
+    style = Column(String(20), default="casual")  # humorous, professional, casual, news, storytelling, educational
+    
+    # 2. 讲述人配置
+    speaker_count = Column(Integer, default=2)
+    speakers = Column(JSON)  # [{"name": "小北", "gender": "female"}, ...]
+    
+    # 3. 文稿长度
+    dialogue_count = Column(Integer, default=65)  # 40-100句
+    
+    # 4. 高级选项
+    interaction_level = Column(String(20), default="balanced")  # high, balanced, low
+    content_depth = Column(String(20), default="moderate")  # simple, moderate, deep
+    emotion_style = Column(String(20), default="natural")  # enthusiastic, natural, calm
+    pace = Column(String(20), default="moderate")  # fast, moderate, slow
+    
+    # 5. 特色功能
+    enable_intro = Column(Boolean, default=True)
+    enable_summary = Column(Boolean, default=True)
+    keep_quotes = Column(Boolean, default=False)
+    highlight_quotes = Column(Boolean, default=False)
+    enable_qa = Column(Boolean, default=False)
+    
+    # ===== 元数据 =====
     is_public = Column(Boolean, default=False)
-    is_default = Column(Boolean, default=False)
+    is_default = Column(Boolean, default=False)  # 用户默认配置
     is_system = Column(Boolean, default=False)  # 系统内置模版
     use_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=func.now())
