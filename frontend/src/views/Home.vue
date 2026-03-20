@@ -148,7 +148,8 @@ const getTimeForLine = (lineIndex: number) => {
 
 const toggleDemoAudio = () => {
   if (!demoAudio.value) {
-    demoAudio.value = new Audio('http://139.196.211.206/audio/demo_chapter_1.mp3')
+    // 使用静态 demo 音频
+    demoAudio.value = new Audio('/demo/chapter_01.mp3')
     demoAudio.value.onloadedmetadata = () => {
       demoDuration.value = demoAudio.value?.duration || 425.78
     }
@@ -327,11 +328,21 @@ const upload = async () => {
   
   try {
     const token = localStorage.getItem('token')
+    
+    // 模拟上传进度提示
+    const progressTimer = setInterval(() => {
+      if (uploadProgress.value === '上传中...') {
+        uploadProgress.value = '上传中...'
+      }
+    }, 500)
+    
     const res = await apiFetch('/api/books', {
       method: 'POST',
       body: form,
       headers: token ? { 'Authorization': `Bearer ${token}` } : {}
     })
+    
+    clearInterval(progressTimer)
     
     if (res.status === 401) {
       // Token 失效，清除登录状态
@@ -351,8 +362,11 @@ const upload = async () => {
     }
     
     const data = await res.json()
+    
+    // 显示OCR识别提示
+    uploadProgress.value = 'OCR识别中...'
+    
     uploadedBookTitle.value = data.title || file.value?.name || '书籍'
-    uploadProgress.value = ''
     file.value = null
     
     // 刷新队列并跳转到第一页
@@ -372,6 +386,8 @@ const upload = async () => {
     // 清除文件选择
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
     if (fileInput) fileInput.value = ''
+    
+    uploadProgress.value = ''
     
   } catch (e: any) {
     alert('上传失败: ' + e.message)
@@ -867,6 +883,48 @@ const formatDate = (dateStr: string) => {
   return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+// 本地时区时间格式化
+const formatLocalTime = (dateStr: string) => {
+  if (!dateStr) return ''
+  
+  // 处理后端返回的时间字符串
+  // 如果是 UTC 时间格式但没有 Z 后缀，添加 Z 表示 UTC
+  let normalizedDateStr = dateStr
+  if (dateStr && !dateStr.endsWith('Z') && dateStr.includes('T')) {
+    normalizedDateStr = dateStr + 'Z'
+  }
+  
+  const d = new Date(normalizedDateStr)
+  const now = new Date()
+  
+  // 计算时间差（毫秒）
+  const diffMs = now.getTime() - d.getTime()
+  
+  // 如果计算出负数，可能是时间字符串已经是本地时间，尝试不添加Z
+  let actualDiffMs = diffMs
+  if (diffMs < 0) {
+    const dLocal = new Date(dateStr)
+    actualDiffMs = now.getTime() - dLocal.getTime()
+  }
+  
+  const diffMins = Math.floor(actualDiffMs / 60000)
+  const diffHours = Math.floor(actualDiffMs / 3600000)
+  const diffDays = Math.floor(actualDiffMs / 86400000)
+  
+  // 一天内显示小时数
+  if (diffMins < 1) return '刚刚'
+  if (diffMins < 60) return `${diffMins}分钟前`
+  if (diffHours < 24) return `${diffHours}小时前`
+  
+  // 超过一天按天计算
+  if (diffDays < 7) return `${diffDays}天前`
+  
+  // 超过7天显示具体日期
+  const month = d.getMonth() + 1
+  const day = d.getDate()
+  return `${month}月${day}日`
+}
+
 // 统计
 const stats = computed(() => {
   const totalBooks = queueBooks.value.length
@@ -905,40 +963,60 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="container">
-    <!-- Header -->
-    <div class="card header-card">
-      <div class="header-left">
-        <h1 class="site-title">📚 枕边书</h1>
-        <p class="site-subtitle">AI 图书转播客 · 一键生成</p>
+  <div class="page-container">
+    <!-- Hero 区域 -->
+    <div class="hero-section">
+      <div class="hero-content">
+        <div class="hero-icon animate-scale-in">
+          <span class="icon-circle">
+            <span class="icon-book">📚</span>
+          </span>
+        </div>
+        <h1 class="hero-title animate-fade-up">枕边书</h1>
+        <p class="hero-subtitle animate-fade-up animate-delay-1">AI 图书转播客 · 一键生成</p>
       </div>
-      <div class="header-right">
-        <div 
-          class="status-badge" 
+      
+      <!-- 右上角：服务状态 + 用户信息 -->
+      <div class="top-right-section animate-fade-up animate-delay-2">
+        <!-- 在线状态 -->
+        <div class="status-indicator" 
           :class="backendOnline ? 'online' : 'offline'"
-          @click="backendOnline ? null : (showCertHint = true)"
-          :title="backendOnline ? '后端服务正常运行' : '点击查看解决方案'"
         >
-          {{ backendOnline ? '● 在线' : '○ 离线' }}
+          <span class="status-dot"></span>
+          <span>{{ backendOnline ? '服务正常' : '服务离线' }}</span>
         </div>
-        <div v-if="user" class="user-info">
-          <span class="user-name">{{ user.nickname || user.email }}</span>
-          <span class="user-balance">{{ user.balance + user.free_quota }}次</span>
-          <button class="logout-btn" @click="logout">退出</button>
-        </div>
-        <div v-else class="auth-buttons">
-          <button class="btn-text" @click="showLogin">登录</button>
-          <button class="btn-secondary" @click="showRegister">注册</button>
+        
+        <!-- 用户信息 -->
+        <div class="user-section">
+          <div v-if="user" class="user-card">
+            <div class="user-avatar">{{ (user.nickname || user.email || 'U')[0].toUpperCase() }}</div>
+            <div class="user-details">
+              <span class="user-name">{{ user.nickname || user.email }}</span>
+              <span class="user-balance">
+                <span class="balance-num">{{ user.balance + user.free_quota }}</span>
+                <span class="balance-unit">次额度</span>
+              </span>
+            </div>
+            <button class="btn-logout" @click="logout">退出</button>
+          </div>
+          <div v-else class="auth-section">
+            <button class="btn btn-outline" @click="showLogin">登录</button>
+            <button class="btn btn-primary btn-glow" @click="showRegister">免费注册</button>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- 上传区域 -->
-    <div class="card upload-card">
-      <h2 class="card-title">📤 上传文件</h2>
+    <div class="upload-section animate-fade-up animate-delay-3">
+      <div class="section-header">
+        <h2>📤 上传文件</h2>
+        <p>支持 PDF、TXT、MD 格式</p>
+      </div>
       
       <div 
-        class="upload-zone" 
+        class="upload-zone"
+        :class="{ 'has-file': file, 'dragging': false }"
         @click="($refs.fileInput as HTMLInputElement).click()"
         @dragover.prevent
         @drop="onDrop"
@@ -950,92 +1028,149 @@ onUnmounted(() => {
           @change="onFileSelect" 
           style="display: none"
         />
-        <div class="upload-icon">📄</div>
-        <p class="upload-text">{{ file ? file.name : '拖拽文件到这里或点击选择' }}</p>
-        <p class="upload-hint">支持 PDF、TXT、MD 格式</p>
+        
+        <div class="upload-content">
+          <div class="upload-icon-wrapper">
+            <div class="upload-icon-bg"></div>
+            <span class="upload-icon">{{ file ? '✅' : '📄' }}</span>
+          </div>
+          <div class="upload-text">
+            <p class="upload-main-text">{{ file ? file.name : '拖拽文件到这里或点击选择' }}</p>
+            <p class="upload-sub-text" v-if="file">点击重新选择</p>
+          </div>
+        </div>
       </div>
       
-      <button 
-        class="btn btn-primary upload-btn"
-        @click="upload" 
-        :disabled="!file || uploading"
-      >
-        {{ uploading ? '⏳ ' + uploadProgress : '🚀 开始生成播客' }}
-      </button>
-      
-      <p class="upload-tip" v-if="!user">
-        💡 新用户注册即送 <strong>3次</strong> 免费体验
-      </p>
+      <div class="upload-actions">
+        <button 
+          class="btn btn-primary btn-lg"
+          :class="{ 'btn-pulse': file && !uploading }"
+          @click="upload" 
+          :disabled="!file || uploading"
+        >
+          <span v-if="uploading" class="upload-progress-content">
+            <span class="progress-dots">
+              <span></span><span></span><span></span>
+            </span>
+            <span>{{ uploadProgress }}</span>
+          </span>
+          <span v-else>开始生成播客</span>
+        </button>
+        
+        <p class="upload-tip" v-if="!user">
+          💡 新用户注册即送 <strong>3次</strong> 免费体验
+        </p>
+        <p class="upload-tip" v-else>
+          📁 任务将保留 <strong>7天</strong>，之后自动清理
+        </p>
+      </div>
     </div>
 
     <!-- 生成队列 -->
-    <div class="card queue-card" v-if="user">
-      <div class="queue-header">
-        <h2 class="card-title">📋 生成队列</h2>
-        <span class="queue-count" v-if="queueBooks.length > 0">共 {{ queueBooks.length }} 个任务</span>
+    <div class="queue-section animate-fade-up animate-delay-4" v-if="user">
+      <div class="section-header">
+        <h2>📋 生成队列</h2>
+        <span class="queue-badge" v-if="queueBooks.length > 0">{{ queueBooks.length }}</span>
       </div>
       
       <!-- 上传成功提示 -->
-      <div v-if="showUploadSuccess" class="upload-success-toast">
+      <div v-if="showUploadSuccess" class="success-toast animate-scale-in">
         <span class="toast-icon">✅</span>
-        <span class="toast-text">《{{ uploadedBookTitle }}》已加入生成队列</span>
+        <span>《{{ uploadedBookTitle }}》已加入队列</span>
       </div>
       
       <!-- 加载中 -->
-      <div v-if="loadingQueue" class="queue-loading">
-        <span>加载中...</span>
+      <div v-if="loadingQueue" class="loading-state">
+        <div class="loading-spinner"></div>
+        <p>加载中...</p>
       </div>
       
       <!-- 空队列 -->
-      <div v-else-if="queueBooks.length === 0" class="queue-empty">
+      <div v-else-if="queueBooks.length === 0" class="empty-state">
+        <div class="empty-icon">📭</div>
         <p>暂无生成任务</p>
-        <p class="queue-hint">上传文件后，任务将在这里显示</p>
+        <p class="empty-hint">上传文件后，任务将在这里显示</p>
       </div>
       
       <!-- 队列列表 -->
       <div v-else class="queue-list">
-        <!-- 书籍列表 - 点击整个卡片进入详情页 -->
         <div 
-          v-for="book in paginatedBooks" 
+          v-for="(book, index) in paginatedBooks" 
           :key="book.id" 
           class="book-card"
+          :style="{ animationDelay: index * 0.1 + 's' }"
           @click="goToBookDetail(book.id)"
         >
-          <!-- 书籍图标 -->
-          <div class="book-card-icon">
+          <!-- 状态指示条 -->
+          <div class="card-status-bar" :class="book.status"></div>
+          
+          <!-- 删除按钮 - 右上角 -->
+          <button class="btn-delete" @click.stop="deleteBook(book.id)" title="删除">
+            🗑️
+          </button>
+          
+          <!-- 左侧：状态图标 -->
+          <div class="book-icon" :class="book.status">
             <span v-if="book.status === 'ready'">📄</span>
             <span v-else-if="book.status === 'script_ready'">📝</span>
             <span v-else-if="book.status === 'completed'">🎧</span>
-            <span v-else-if="book.status === 'generating_script'">⏳</span>
-            <span v-else-if="book.status === 'generating_audio'">🎙️</span>
+            <span v-else-if="book.status === 'generating_script'">
+              <span class="icon-spinner"></span>
+            </span>
+            <span v-else-if="book.status === 'generating_audio'">
+              <span class="icon-wave"></span>
+            </span>
+            <span v-else-if="book.status === 'processing' || book.status === 'ocr' || book.status === 'pending'">
+              <span class="icon-spinner"></span>
+            </span>
             <span v-else>📄</span>
           </div>
           
-          <!-- 书籍信息 -->
-          <div class="book-card-info">
-            <div class="book-card-title">{{ book.title }}</div>
-            <div class="book-card-meta">
-              <span>{{ book.total_chapters }}章</span>
-              <span>·</span>
-              <span>{{ formatDate(book.created_at) }}</span>
+          <!-- 中间：书籍信息 -->
+          <div class="book-info">
+            <h3 class="book-title">{{ book.title }}</h3>
+            <div class="book-meta">
+              <span class="meta-item">{{ book.total_chapters }} 章</span>
+              <span class="meta-divider">·</span>
+              <span class="meta-item">{{ formatLocalTime(book.created_at) }}</span>
+            </div>
+            <!-- 处理中的提示 -->
+            <div class="book-progress-hint" v-if="book.status === 'processing' || book.status === 'ocr' || book.status === 'pending'">
+              <div class="progress-dots">
+                <span></span><span></span><span></span>
+              </div>
+              <span>正在识别文档内容...</span>
+            </div>
+            <div class="book-progress-hint" v-else-if="book.status === 'generating_script'">
+              <div class="progress-dots">
+                <span></span><span></span><span></span>
+              </div>
+              <span>AI正在创作播客文稿...</span>
+            </div>
+            <div class="book-progress-hint" v-else-if="book.status === 'generating_audio'">
+              <div class="progress-dots">
+                <span></span><span></span><span></span>
+              </div>
+              <span>正在合成语音音频...</span>
             </div>
           </div>
           
-          <!-- 状态标签 -->
-          <div class="book-card-status">
-            <span v-if="book.status === 'ready'" class="status-badge ready">OCR完成</span>
-            <span v-else-if="book.status === 'script_ready'" class="status-badge script">文稿就绪</span>
-            <span v-else-if="book.status === 'completed'" class="status-badge completed">已完成</span>
-            <span v-else-if="book.status === 'generating_script'" class="status-badge processing">生成文稿中...</span>
-            <span v-else-if="book.status === 'generating_audio'" class="status-badge processing">生成音频中...</span>
-            <span v-else class="status-badge">{{ book.status }}</span>
+          <!-- 右侧：状态标签 -->
+          <div class="book-status">
+            <span v-if="book.status === 'ready'" class="badge badge-success">OCR完成</span>
+            <span v-else-if="book.status === 'script_ready'" class="badge badge-info">文稿就绪</span>
+            <span v-else-if="book.status === 'completed'" class="badge badge-success">已完成</span>
+            <span v-else-if="book.status === 'generating_script'" class="badge badge-processing">
+              生成文稿中
+            </span>
+            <span v-else-if="book.status === 'generating_audio'" class="badge badge-processing">
+              合成音频中
+            </span>
+            <span v-else-if="book.status === 'processing' || book.status === 'ocr' || book.status === 'pending'" class="badge badge-processing">
+              OCR识别中
+            </span>
+            <span v-else class="badge">{{ book.status }}</span>
           </div>
-          
-          <!-- 箭头 -->
-          <div class="book-card-arrow">→</div>
-          
-          <!-- 删除按钮 -->
-          <button class="delete-btn-inline" @click.stop="deleteBook(book.id)" title="删除">🗑️</button>
         </div>
         
         <!-- 分页 -->
@@ -1055,9 +1190,12 @@ onUnmounted(() => {
     </div>
 
     <!-- 示例作品 -->
-    <div class="card demo-card">
-      <h2 class="card-title">🎧 听听效果</h2>
-      <p class="demo-subtitle">这是 AI 生成的播客示例，感受一下效果</p>
+    <div class="demo-section animate-fade-up animate-delay-5">
+      <div class="section-header">
+        <h2>🎧 听听效果</h2>
+        <p>AI 生成的播客示例</p>
+      </div>
+      
       <div class="demo-player">
         <div class="demo-info">
           <span class="demo-book">📖 试听文件</span>
@@ -1067,7 +1205,13 @@ onUnmounted(() => {
         <!-- 音频控制 -->
         <div class="demo-controls">
           <button class="demo-play-btn" @click="toggleDemoAudio">
-            {{ demoPlaying ? '⏸️' : '▶️' }}
+            <svg v-if="demoPlaying" viewBox="0 0 24 24" width="24" height="24">
+              <rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/>
+              <rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/>
+            </svg>
+            <svg v-else viewBox="0 0 24 24" width="24" height="24">
+              <path d="M8 5v14l11-7z" fill="currentColor"/>
+            </svg>
           </button>
           <div class="demo-progress" @click="seekDemoAudio">
             <div class="demo-progress-fill" :style="{ width: demoProgress + '%' }"></div>
@@ -1298,159 +1442,363 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Header */
-.header-card {
+/* ========== 页面容器 ========== */
+.page-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 20px;
+  min-height: 100vh;
+}
+
+/* ========== Hero 区域 ========== */
+.hero-section {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
+  padding: 32px;
+  background: linear-gradient(135deg, rgba(0, 40, 25, 0.8), rgba(15, 36, 25, 0.6));
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 20px;
+  margin-bottom: 24px;
+  position: relative;
+  overflow: hidden;
 }
 
-.header-left {
+.hero-section::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(76, 175, 80, 0.1) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.hero-content {
   flex: 1;
 }
 
-.site-title {
-  font-size: 28px;
-  color: #4caf50;
-  margin: 0;
+.hero-icon {
+  margin-bottom: 16px;
 }
 
-.site-subtitle {
-  font-size: 13px;
+.icon-circle {
+  display: inline-flex;
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.25), rgba(46, 125, 50, 0.15));
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  animation: ring 2s ease-in-out infinite;
+}
+
+@keyframes ring {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(76, 175, 80, 0); }
+}
+
+.icon-book {
+  font-size: 32px;
+}
+
+.hero-title {
+  font-size: 32px;
+  color: #e8f5e9;
+  margin: 0 0 8px 0;
+  font-weight: 700;
+}
+
+.hero-subtitle {
+  font-size: 16px;
   color: #81c784;
-  margin: 4px 0 0 0;
+  margin: 0 0 16px 0;
 }
 
-.header-right {
+.status-row {
   display: flex;
   align-items: center;
-  gap: 16px;
 }
 
-.status-badge {
-  padding: 6px 12px;
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(0, 30, 20, 0.6);
   border-radius: 20px;
-  font-size: 12px;
-  border: 1px solid;
+  font-size: 13px;
 }
 
-.status-badge.online {
-  background: rgba(76, 175, 80, 0.2);
-  border-color: #4caf50;
+.status-indicator.online {
   color: #81c784;
 }
 
-.status-badge.offline {
-  background: rgba(244, 67, 54, 0.2);
-  border-color: #f44336;
+.status-indicator.offline {
   color: #ef5350;
-  cursor: pointer;
 }
 
-.user-info {
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ========== 用户区域 ========== */
+/* ========== 右上角区域 ========== */
+.top-right-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.user-section {
+  margin-left: 0;
+}
+
+.user-card {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 12px 16px;
+  background: rgba(0, 30, 20, 0.6);
+  border-radius: 12px;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .user-name {
   color: #e8f5e9;
   font-size: 14px;
+  font-weight: 500;
 }
 
 .user-balance {
-  background: rgba(76, 175, 80, 0.2);
-  padding: 4px 10px;
-  border-radius: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.balance-num {
   color: #4caf50;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.balance-unit {
+  color: #81c784;
   font-size: 12px;
 }
 
-.logout-btn {
+.btn-logout {
   background: none;
   border: 1px solid rgba(76, 175, 80, 0.3);
   color: #81c784;
   padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.auth-buttons {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-text {
-  background: none;
-  border: none;
-  color: #81c784;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.btn-secondary {
-  background: rgba(76, 175, 80, 0.2);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-  color: #81c784;
-  padding: 8px 16px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
+  transition: all 0.2s;
 }
 
-/* Card */
-.card-title {
+.btn-logout:hover {
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.auth-section {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.btn-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(76, 175, 80, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(76, 175, 80, 0.5); }
+}
+
+/* ========== Section 通用样式 ========== */
+.section-header {
   margin-bottom: 20px;
-  color: #4caf50;
+}
+
+.section-header h2 {
+  color: #81c784;
   font-size: 18px;
+  margin: 0 0 4px 0;
 }
 
-/* Upload */
-.upload-card {
-  margin-bottom: 20px;
+.section-header p {
+  color: #666;
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ========== 上传区域 ========== */
+.upload-section {
+  background: rgba(0, 40, 25, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
 }
 
 .upload-zone {
-  border: 2px dashed rgba(76, 175, 80, 0.4);
+  border: 2px dashed rgba(76, 175, 80, 0.3);
   border-radius: 16px;
-  padding: 40px;
+  padding: 48px 32px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.3s ease;
   margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-zone::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.05), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
 .upload-zone:hover {
   border-color: #4caf50;
+  transform: scale(1.01);
+}
+
+.upload-zone:hover::before {
+  opacity: 1;
+}
+
+.upload-zone.has-file {
+  border-style: solid;
+  border-color: #4caf50;
   background: rgba(76, 175, 80, 0.05);
+}
+
+.upload-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.upload-icon-wrapper {
+  position: relative;
+}
+
+.upload-icon-bg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80px;
+  height: 80px;
+  background: rgba(76, 175, 80, 0.1);
+  border-radius: 50%;
 }
 
 .upload-icon {
   font-size: 48px;
-  margin-bottom: 12px;
+  position: relative;
 }
 
-.upload-text {
+.upload-main-text {
   color: #e8f5e9;
-  margin: 0 0 8px 0;
-}
-
-.upload-hint {
-  font-size: 12px;
-  color: #81c784;
+  font-size: 16px;
   margin: 0;
 }
 
-.upload-btn {
-  width: 100%;
+.upload-sub-text {
+  color: #81c784;
+  font-size: 12px;
+  margin: 4px 0 0 0;
 }
 
-.upload-tip {
+.upload-actions {
   text-align: center;
+}
+
+.upload-actions .btn-lg {
+  min-width: 200px;
+}
+
+.loading-spinner-sm {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 上传进度内容 */
+.upload-progress-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.upload-progress-content .progress-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.upload-progress-content .progress-dots span {
+  width: 6px;
+  height: 6px;
+  background: white;
+  border-radius: 50%;
+  animation: dotPulse 1.4s ease-in-out infinite;
+}
+
+.upload-progress-content .progress-dots span:nth-child(1) { animation-delay: 0s; }
+.upload-progress-content .progress-dots span:nth-child(2) { animation-delay: 0.2s; }
+.upload-progress-content .progress-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+.upload-tip {
   color: #81c784;
   font-size: 13px;
   margin: 12px 0 0 0;
@@ -1460,44 +1808,320 @@ onUnmounted(() => {
   color: #4caf50;
 }
 
-/* Features */
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 16px;
+/* ========== 队列区域 ========== */
+.queue-section {
+  background: rgba(0, 40, 25, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
 }
 
-.feature-item {
-  text-align: center;
-  padding: 20px;
-  background: rgba(0, 30, 20, 0.4);
+.queue-badge {
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  color: white;
+  padding: 4px 12px;
   border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.feature-icon {
-  font-size: 32px;
-  margin-bottom: 8px;
+.success-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: rgba(76, 175, 80, 0.15);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  color: #81c784;
 }
 
-.feature-item h3 {
-  font-size: 14px;
+.toast-icon {
+  font-size: 18px;
+}
+
+.loading-state, .empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: #666;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.empty-hint {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+/* ========== 书籍卡片 ========== */
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.book-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  padding-bottom: 40px; /* 为底部状态标签留空间 */
+  background: rgba(0, 30, 20, 0.5);
+  border: 1px solid rgba(76, 175, 80, 0.15);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  animation: fadeInUp 0.4s ease both;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.book-card:hover {
+  border-color: rgba(76, 175, 80, 0.4);
+  background: rgba(0, 40, 25, 0.6);
+  transform: translateX(4px);
+}
+
+.card-status-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 12px 0 0 12px;
+}
+
+.card-status-bar.ready { background: #4caf50; }
+.card-status-bar.script_ready { background: #2196f3; }
+.card-status-bar.completed { background: #9c27b0; }
+.card-status-bar.generating_script { background: #ff9800; }
+.card-status-bar.generating_audio { background: #00bcd4; }
+.card-status-bar.processing, .card-status-bar.ocr, .card-status-bar.pending { background: #ff9800; }
+
+.book-icon {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  background: rgba(76, 175, 80, 0.15);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.book-icon.generating_script,
+.book-icon.generating_audio,
+.book-icon.processing,
+.book-icon.ocr,
+.book-icon.pending {
+  background: rgba(255, 152, 0, 0.2);
+}
+
+/* 图标旋转动画 */
+.icon-spinner {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(76, 175, 80, 0.3);
+  border-top-color: #4caf50;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* 音频波形动画 */
+.icon-wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 20px;
+}
+
+.icon-wave::before,
+.icon-wave::after,
+.icon-wave {
+  content: '';
+  width: 4px;
+  background: #4caf50;
+  border-radius: 2px;
+  animation: wave 1s ease-in-out infinite;
+}
+
+.icon-wave::before { height: 8px; animation-delay: 0s; }
+.icon-wave { height: 16px; animation-delay: 0.15s; }
+.icon-wave::after { height: 12px; animation-delay: 0.3s; }
+
+@keyframes wave {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.5); }
+}
+
+.book-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.book-title {
+  font-size: 15px;
   color: #e8f5e9;
   margin: 0 0 6px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.feature-item p {
+.book-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   color: #81c784;
-  margin: 0;
 }
 
-/* Pricing */
-.pricing-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+.book-progress-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #ffb74d;
 }
 
+.progress-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.progress-dots span {
+  width: 6px;
+  height: 6px;
+  background: #ffb74d;
+  border-radius: 50%;
+  animation: dotPulse 1.4s ease-in-out infinite;
+}
+
+.progress-dots span:nth-child(1) { animation-delay: 0s; }
+.progress-dots span:nth-child(2) { animation-delay: 0.2s; }
+.progress-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes dotPulse {
+  0%, 80%, 100% { 
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% { 
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.meta-divider {
+  opacity: 0.5;
+}
+
+.book-status {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+}
+
+/* 删除按钮 - 右上角 */
+.btn-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.3);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  z-index: 10;
+}
+
+.book-card:hover .btn-delete {
+  opacity: 1;
+}
+
+.btn-delete:hover {
+  background: rgba(244, 67, 54, 0.3);
+}
+
+/* ========== 分页 ========== */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.page-btn {
+  width: 36px;
+  height: 36px;
+  background: rgba(0, 30, 20, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 8px;
+  color: #81c784;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: rgba(76, 175, 80, 0.2);
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.page-btn.active {
+  background: #4caf50;
+  border-color: #4caf50;
+  color: white;
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ========== Demo 区域 ========== */
+.demo-section {
+  background: rgba(0, 40, 25, 0.6);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.demo-player {
+  background: rgba(0, 30, 20, 0.6);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* ========== 价格区域（保留原样式） ========== */
 .price-item {
   text-align: center;
   padding: 20px;
@@ -2277,6 +2901,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   transition: transform 0.2s;
+  color: white;
 }
 
 .demo-play-btn:hover {
@@ -2598,15 +3223,145 @@ onUnmounted(() => {
   margin-bottom: 12px;
 }
 
-@media (max-width: 600px) {
-  .header-card {
-    flex-direction: column;
-    align-items: flex-start;
+/* ========== 响应式适配 ========== */
+@media (max-width: 768px) {
+  .page-container {
+    padding: 12px;
   }
   
-  .header-right {
+  /* Hero 区域 */
+  .hero-section {
+    flex-direction: column;
+    padding: 24px 20px;
+    gap: 20px;
+  }
+  
+  .hero-content {
+    text-align: center;
+  }
+  
+  .hero-title {
+    font-size: 26px;
+  }
+  
+  .hero-subtitle {
+    font-size: 14px;
+  }
+  
+  .status-row {
+    justify-content: center;
+  }
+  
+  .user-section {
+    margin-left: 0;
     width: 100%;
-    justify-content: space-between;
+  }
+  
+  .user-card {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .auth-section {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .auth-section .btn {
+    flex: 1;
+    max-width: 120px;
+  }
+  
+  /* 上传区域 */
+  .upload-section {
+    padding: 16px;
+  }
+  
+  .upload-zone {
+    padding: 32px 20px;
+  }
+  
+  .upload-icon {
+    font-size: 36px;
+  }
+  
+  .upload-main-text {
+    font-size: 14px;
+  }
+  
+  .upload-actions .btn-lg {
+    width: 100%;
+  }
+  
+  /* 队列区域 */
+  .queue-section {
+    padding: 16px;
+  }
+  
+  .section-header {
+    text-align: center;
+  }
+  
+  .book-card {
+    padding: 14px;
+    gap: 12px;
+  }
+  
+  .card-status-bar {
+    width: 3px;
+  }
+  
+  .book-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+  }
+  
+  .book-title {
+    font-size: 14px;
+  }
+  
+  .book-meta {
+    font-size: 11px;
+  }
+  
+  .book-status .badge {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+  
+  .btn-delete {
+    display: none;
+  }
+  
+  /* Demo 区域 */
+  .demo-section {
+    padding: 16px;
+  }
+  
+  /* 播放器 */
+  .player-header {
+    padding: 12px;
+  }
+  
+  .player-script {
+    max-height: 200px;
+  }
+  
+  .script-line {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  
+  /* 模态框 */
+  .modal-overlay {
+    padding: 12px;
+  }
+  
+  .modal-content {
+    margin: 0;
+    max-height: 90vh;
   }
   
   .voice-options {
@@ -2622,6 +3377,49 @@ onUnmounted(() => {
     width: 100%;
     text-align: center;
     margin-top: 8px;
+  }
+}
+
+@media (max-width: 400px) {
+  .hero-title {
+    font-size: 22px;
+  }
+  
+  .icon-circle {
+    width: 56px;
+    height: 56px;
+  }
+  
+  .icon-book {
+    font-size: 28px;
+  }
+  
+  .user-card {
+    padding: 10px 12px;
+  }
+  
+  .user-avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+  
+  .balance-num {
+    font-size: 14px;
+  }
+  
+  .book-card {
+    flex-wrap: wrap;
+  }
+  
+  .book-info {
+    width: calc(100% - 60px);
+  }
+  
+  .book-status {
+    width: 100%;
+    margin-top: 8px;
+    justify-content: flex-start;
   }
 }
 </style>

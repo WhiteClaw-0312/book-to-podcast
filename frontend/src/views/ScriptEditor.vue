@@ -230,7 +230,8 @@ const confirmGenerateAudio = async () => {
 
 // 返回
 const goBack = () => {
-  router.push('/')
+  // 返回到书籍详情页
+  router.push(`/book/${route.params.id}`)
 }
 
 onMounted(() => {

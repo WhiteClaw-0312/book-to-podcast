@@ -58,6 +58,30 @@ app.add_middleware(
 # 静态文件
 app.mount("/audio", StaticFiles(directory=settings.PODCASTS_DIR), name="audio")
 
+# Demo音频端点
+@app.get("/api/demo/audio")
+async def get_demo_audio():
+    """Demo音频 - 用于首页试听"""
+    from fastapi.responses import FileResponse
+    
+    # 使用第一个可用的音频文件作为demo
+    podcasts_dir = settings.PODCASTS_DIR
+    for book_dir in podcasts_dir.iterdir():
+        if book_dir.is_dir():
+            for audio_file in book_dir.glob("chapter_01.mp3"):
+                return FileResponse(
+                    audio_file,
+                    media_type="audio/mpeg",
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Content-Length": str(audio_file.stat().st_size),
+                    }
+                )
+    
+    # 如果没有找到，返回404
+    from fastapi import HTTPException
+    raise HTTPException(404, "Demo audio not found")
+
 # 路由
 app.include_router(auth_router)
 app.include_router(prompts_router)

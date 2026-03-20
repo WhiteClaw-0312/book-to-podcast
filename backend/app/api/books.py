@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks, Header
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -191,6 +191,25 @@ async def get_my_books(
     if not user:
         raise HTTPException(401, "请先登录")
     
+    # 自动清理7天前的任务
+    from datetime import datetime, timedelta
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    
+    old_books = db.query(Book).filter(
+        Book.api_key == user.api_key,
+        Book.created_at < seven_days_ago
+    ).all()
+    
+    for old_book in old_books:
+        # 删除相关章节
+        db.query(Chapter).filter(Chapter.book_id == old_book.id).delete()
+        # 删除书籍记录
+        db.delete(old_book)
+    
+    if old_books:
+        db.commit()
+        print(f"已清理 {len(old_books)} 个超过7天的任务")
+    
     # 查询用户的书籍
     books = db.query(Book).filter(
         Book.api_key == user.api_key
@@ -202,20 +221,28 @@ async def get_my_books(
             Chapter.book_id == book.id
         ).order_by(Chapter.number).all()
         
+        # 计算剩余天数
+        days_remaining = 7
+        if book.created_at:
+            age = datetime.utcnow() - book.created_at
+            days_remaining = max(0, 7 - age.days)
+        
         result.append({
             "id": book.id,
             "title": book.title,
             "status": book.status,
             "total_chapters": book.total_chapters,
             "completed_chapters": book.completed_chapters,
-            "created_at": book.created_at.isoformat() if book.created_at else None,
-            "expires_at": book.expires_at.isoformat() if book.expires_at else None,
+            "created_at": book.created_at.isoformat() + "Z" if book.created_at else None,
+            "expires_at": book.expires_at.isoformat() + "Z" if book.expires_at else None,
+            "days_remaining": days_remaining,
             "chapters": [
                 {
                     "id": ch.id,
                     "number": ch.number,
                     "title": ch.title,
                     "status": ch.status,
+                    "word_count": len(ch.content) if ch.content else 0,
                     "has_script": bool(ch.script),
                     "has_audio": bool(ch.audio_path),
                     "duration": ch.duration
@@ -262,6 +289,7 @@ async def get_book_status(book_id: str, db: Session = Depends(get_db)):
                 "number": ch.number,
                 "title": ch.title,
                 "content": ch.content[:500] if ch.content else "",  # 返回前500字符用于预览
+                "word_count": len(ch.content) if ch.content else 0,  # 实际字数
                 "page_range": ch.page_range,
                 "status": ch.status,
                 "duration": ch.duration,
@@ -764,8 +792,13 @@ async def generate_chapters(book_id: str, chapter_numbers: List[int], api_key: s
 
 
 @router.get("/{book_id}/chapters/{chapter_num}/audio")
-async def get_audio(book_id: str, chapter_num: int, db: Session = Depends(get_db)):
-    """获取音频文件"""
+async def get_audio(
+    book_id: str, 
+    chapter_num: int, 
+    db: Session = Depends(get_db),
+    range: Optional[str] = Header(None)
+):
+    """获取音频文件 - 支持 Range 请求实现跳转"""
     
     chapter = db.query(Chapter).filter(
         Chapter.book_id == book_id,
@@ -778,10 +811,59 @@ async def get_audio(book_id: str, chapter_num: int, db: Session = Depends(get_db
     if not chapter.audio_path or not Path(chapter.audio_path).exists():
         raise HTTPException(404, "音频文件不存在")
     
+    file_path = Path(chapter.audio_path)
+    file_size = file_path.stat().st_size
+    
+    # 处理 Range 请求
+    if range:
+        # 解析 Range 头 (格式: bytes=start-end)
+        start, end = 0, file_size - 1
+        
+        try:
+            range_match = range.replace("bytes=", "").split("-")
+            start = int(range_match[0]) if range_match[0] else 0
+            end = int(range_match[1]) if range_match[1] else file_size - 1
+        except:
+            start, end = 0, file_size - 1
+        
+        # 确保范围有效
+        start = max(0, start)
+        end = min(file_size - 1, end)
+        content_length = end - start + 1
+        
+        # 读取指定范围的文件内容
+        async def iterfile():
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                chunk_size = 64 * 1024  # 64KB chunks
+                while remaining > 0:
+                    read_size = min(chunk_size, remaining)
+                    data = f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        
+        return StreamingResponse(
+            iterfile(),
+            media_type="audio/mpeg",
+            status_code=206,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(content_length),
+            }
+        )
+    
+    # 无 Range 请求，返回完整文件
     return FileResponse(
-        chapter.audio_path,
+        file_path,
         media_type="audio/mpeg",
-        filename=f"chapter_{chapter_num:02d}.mp3"
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        }
     )
 
 
@@ -1020,6 +1102,29 @@ async def merge_chapters(
     merged_content = "\n\n".join([ch.content or "" for ch in chapters])
     merged_title = new_title or f"第{chapters[0].number}-{chapters[-1].number}章"
     
+    # 计算合并后的页码范围
+    def parse_page_range(page_range: str) -> tuple:
+        """解析页码范围，返回 (min_page, max_page)"""
+        if not page_range:
+            return (None, None)
+        import re
+        numbers = re.findall(r'\d+', page_range)
+        if not numbers:
+            return (None, None)
+        nums = [int(n) for n in numbers]
+        return (min(nums), max(nums))
+    
+    all_pages = []
+    for ch in chapters:
+        min_p, max_p = parse_page_range(ch.page_range)
+        if min_p:
+            all_pages.extend([min_p, max_p] if max_p else [min_p])
+    
+    if all_pages:
+        merged_page_range = f"{min(all_pages)}-{max(all_pages)}"
+    else:
+        merged_page_range = ""
+    
     # 删除旧章节
     for ch in chapters:
         db.delete(ch)
@@ -1030,7 +1135,7 @@ async def merge_chapters(
         number=chapters[0].number,
         title=merged_title,
         content=merged_content[:15000],
-        page_range=f"{chapters[0].page_range or ''}-{chapters[-1].page_range or ''}",
+        page_range=merged_page_range,
         status="pending"
     )
     db.add(new_chapter)
@@ -1049,10 +1154,28 @@ async def merge_chapters(
     book.total_chapters = db.query(Chapter).filter(Chapter.book_id == book_id).count()
     db.commit()
     
+    # 返回更新后的章节列表
+    updated_chapters = db.query(Chapter).filter(
+        Chapter.book_id == book_id
+    ).order_by(Chapter.number).all()
+    
     return {
         "message": f"已合并 {len(chapters)} 个章节",
         "new_chapter_number": chapters[0].number,
-        "total_chapters": book.total_chapters
+        "total_chapters": book.total_chapters,
+        "chapters": [
+            {
+                "id": ch.id,
+                "number": ch.number,
+                "title": ch.title,
+                "content": ch.content[:500] if ch.content else "",
+                "word_count": len(ch.content) if ch.content else 0,
+                "page_range": ch.page_range,
+                "status": ch.status,
+                "has_script": bool(ch.script),
+                "has_audio": bool(ch.audio_path)
+            } for ch in updated_chapters
+        ]
     }
 
 

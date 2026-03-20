@@ -73,6 +73,9 @@ class ChapterResponse(BaseModel):
     id: str
     number: int
     title: str
+    content: Optional[str] = None
+    word_count: int = 0
+    page_range: Optional[str] = None
     status: str
     duration: float
     has_script: bool = False
