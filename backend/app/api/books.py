@@ -354,13 +354,13 @@ async def get_book_progress(book_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{book_id}/generate-script", response_model=GenerateResponse)
-async def generate_script_only(
+async def generate_script_only_endpoint(
     book_id: str,
     request: GenerateRequest,
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_optional_user)
 ):
-    """生成文稿（加入队列，异步处理）"""
+    """生成文稿（加入队列，异步处理）v5.0 支持 Prompt 配置"""
     
     if not user:
         raise HTTPException(401, "请先登录")
@@ -375,6 +375,13 @@ async def generate_script_only(
     if book.api_key != api_key:
         raise HTTPException(403, "无权操作此书籍")
     
+    # 🆕 处理 Prompt 配置
+    prompt_config = request.prompt_config
+    if prompt_config:
+        # 如果有配置，可以创建或更新 PromptTemplate
+        # 这里简化处理，直接传递配置
+        pass
+    
     # 创建任务队列
     for chapter_num in request.chapters:
         queue_service.create_task(db, book_id, chapter_num, "script")
@@ -383,7 +390,7 @@ async def generate_script_only(
     book.status = "generating_script"
     db.commit()
     
-    # 启动后台任务
+    # 启动后台任务（传递 prompt_config）
     for chapter_num in request.chapters:
         task = db.query(TaskQueue).filter(
             TaskQueue.book_id == book_id,
@@ -393,13 +400,30 @@ async def generate_script_only(
         ).order_by(TaskQueue.created_at.desc()).first()
         
         if task:
-            run_task_in_background(task.id, "script", book_id, chapter_num)
+            run_generate_script_only_with_config(book_id, [chapter_num], prompt_config)
     
     return GenerateResponse(
         message=f"已加入队列，开始生成 {len(request.chapters)} 章文稿",
         cost=0,
-        estimated_time=len(request.chapters) * 60
+        estimated_time=len(request.chapters) * 90  # 🆕 增加预估时间（SKILL 需要更多时间）
     )
+
+
+def run_generate_script_only_with_config(book_id: str, chapter_numbers: List[int], prompt_config: dict = None):
+    """只生成文稿（带配置）"""
+    import threading
+    import asyncio
+    
+    def run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(generate_script_only(book_id, chapter_numbers, prompt_config))
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
 
 
 @router.post("/{book_id}/generate-audio", response_model=GenerateResponse)
@@ -535,7 +559,7 @@ def run_generate_chapters(book_id: str, chapter_numbers: List[int], api_key: str
     thread.start()
 
 
-def run_generate_script_only(book_id: str, chapter_numbers: List[int]):
+def run_generate_script_only(book_id: str, chapter_numbers: List[int], prompt_config: dict = None):
     """只生成文稿"""
     import threading
     import asyncio
@@ -544,7 +568,7 @@ def run_generate_script_only(book_id: str, chapter_numbers: List[int]):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(generate_script_only(book_id, chapter_numbers))
+            loop.run_until_complete(generate_script_only(book_id, chapter_numbers, prompt_config))
         finally:
             loop.close()
     
@@ -569,13 +593,20 @@ def run_generate_audio_only(book_id: str, chapter_numbers: List[int], api_key: s
     thread.start()
 
 
-async def generate_script_only(book_id: str, chapter_numbers: List[int]):
-    """只生成文稿，不生成音频"""
+async def generate_script_only(book_id: str, chapter_numbers: List[int], prompt_config: dict = None):
+    """只生成文稿，不生成音频（v5.0 支持 SKILL + Prompt 配置）"""
     from ..database import SessionLocal
     
     db = SessionLocal()
     try:
         book = db.query(Book).filter(Book.id == book_id).first()
+        
+        # 获取 Prompt 配置
+        prompt_template = None
+        if book and book.prompt_id:
+            prompt_template = db.query(PromptTemplate).filter(
+                PromptTemplate.id == book.prompt_id
+            ).first()
         
         for i, num in enumerate(chapter_numbers):
             chapter = db.query(Chapter).filter(
@@ -593,15 +624,59 @@ async def generate_script_only(book_id: str, chapter_numbers: List[int]):
                 book.script_progress = int((i / len(chapter_numbers)) * 100)
                 db.commit()
                 
-                # 生成文稿
-                script = await llm_service.generate_script(
+                # 🆕 v5.0: 使用新的 SKILL 流程生成文稿
+                result = await llm_service.generate_script_with_skill(
                     book_title=book.title,
                     author=book.author,
                     chapter_number=chapter.number,
                     chapter_title=chapter.title,
-                    content=chapter.content or ""
+                    content=chapter.content or "",
+                    prompt_config=prompt_config  # 传递用户配置
                 )
                 
+                script = result.get("script", {})
+                skill_data = result.get("skill", {})
+                
+                # 🆕 保存 SKILL 到数据库
+                if skill_data:
+                    from ..models import ChapterSkill
+                    existing_skill = db.query(ChapterSkill).filter(
+                        ChapterSkill.chapter_id == chapter.id
+                    ).first()
+                    
+                    if existing_skill:
+                        # 更新
+                        existing_skill.summary = skill_data.get("summary", "")
+                        existing_skill.key_points = skill_data.get("key_points", [])
+                        existing_skill.themes = skill_data.get("themes", [])
+                        existing_skill.examples = skill_data.get("examples", [])
+                        existing_skill.insights = skill_data.get("insights", [])
+                        existing_skill.important_details = skill_data.get("important_details", [])
+                        existing_skill.full_skill_md = skill_data.get("full_skill_md", "")
+                        existing_skill.content_length = skill_data.get("content_length", 0)
+                        existing_skill.skill_length = skill_data.get("skill_length", 0)
+                        existing_skill.processing_time = skill_data.get("processing_time", 0)
+                    else:
+                        # 创建
+                        new_skill = ChapterSkill(
+                            chapter_id=chapter.id,
+                            summary=skill_data.get("summary", ""),
+                            key_points=skill_data.get("key_points", []),
+                            themes=skill_data.get("themes", []),
+                            examples=skill_data.get("examples", []),
+                            insights=skill_data.get("insights", []),
+                            important_details=skill_data.get("important_details", []),
+                            full_skill_md=skill_data.get("full_skill_md", ""),
+                            content_length=skill_data.get("content_length", 0),
+                            skill_length=skill_data.get("skill_length", 0),
+                            processing_time=skill_data.get("processing_time", 0)
+                        )
+                        db.add(new_skill)
+                    
+                    chapter.status = "skilled"  # 🆕 新状态：SKILL 已生成
+                    db.commit()
+                
+                # 保存文稿
                 chapter.script = json.dumps(script, ensure_ascii=False)
                 chapter.status = "script_ready"  # 文稿就绪，等待用户编辑
                 book.script_progress = int(((i + 1) / len(chapter_numbers)) * 100)

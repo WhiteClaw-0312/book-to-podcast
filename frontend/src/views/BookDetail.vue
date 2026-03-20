@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, getApiUrl, getToken, getUser } from '../api'
+import PromptConfigPanel from '../components/PromptConfigPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -49,6 +50,10 @@ const book = ref<BookData | null>(null)
 const loading = ref(true)
 const generating = ref(false)
 const selectedChapters = ref<number[]>([])
+
+// 🆕 Prompt 配置面板
+const showConfigPanel = ref(false)
+const currentPromptConfig = ref<any>(null)
 
 // 章节预览编辑
 const showChapterModal = ref(false)
@@ -259,9 +264,18 @@ const startPolling = () => {
   pollingTimer.value = setInterval(fetchProgress, 2000)
 }
 
-// 生成文稿（第一步）
+// 生成文稿（第一步）- 显示配置面板
 const generateScripts = async () => {
   if (!selectedCount.value) return
+  
+  // 🆕 显示配置面板
+  showConfigPanel.value = true
+}
+
+// 🆕 应用配置后开始生成
+const onApplyConfig = async (config: any) => {
+  showConfigPanel.value = false
+  currentPromptConfig.value = config
   
   generating.value = true
   
@@ -271,7 +285,8 @@ const generateScripts = async () => {
       method: 'POST',
       headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       body: JSON.stringify({
-        chapters: selectedChapters.value
+        chapters: selectedChapters.value,
+        prompt_config: config  // 🆕 传递配置
       })
     })
     
@@ -287,6 +302,11 @@ const generateScripts = async () => {
     alert('生成文稿失败: ' + e.message)
     generating.value = false
   }
+}
+
+// 🆕 关闭配置面板
+const onCloseConfigPanel = () => {
+  showConfigPanel.value = false
 }
 
 // 编辑文稿
@@ -1109,6 +1129,14 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  
+  <!-- 🆕 Prompt 配置面板 -->
+  <PromptConfigPanel 
+    :visible="showConfigPanel" 
+    :book-id="book?.id"
+    @apply="onApplyConfig"
+    @close="onCloseConfigPanel"
+  />
 </template>
 
 <style scoped>

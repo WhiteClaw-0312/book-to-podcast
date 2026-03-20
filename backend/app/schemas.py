@@ -102,6 +102,7 @@ class GenerateRequest(BaseModel):
     chapters: List[int]
     api_key: str = ""  # 可选，token 认证时不需要
     voice_mapping: Optional[dict] = None  # 角色到音色的映射 {"小北": "zh-CN-XiaoxiaoNeural"}
+    prompt_config: Optional[dict] = None  # 🆕 Prompt 配置
 
 
 class GenerateResponse(BaseModel):
